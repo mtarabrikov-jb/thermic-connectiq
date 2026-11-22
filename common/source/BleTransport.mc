@@ -1,7 +1,6 @@
 import Toybox.BluetoothLowEnergy;
 import Toybox.Lang;
 import Toybox.System;
-import Toybox.Timer;
 
 // One connected pack.
 (:real)
@@ -11,6 +10,7 @@ class Link {
     public var pack as Pack;
     public var heat as Characteristic? = null;
     public var battery as Characteristic? = null;
+    public var temperature as Characteristic? = null;
     // Level waiting to be written; null when nothing is pending.
     public var pendingLevel as Number? = null;
 
@@ -45,11 +45,19 @@ function makeTransport(model as Model) as Transport {
 //     "discoverable" flag, so a pack is recognised by its service UUID alone;
 //   - Connect IQ takes one GATT request at a time, hence the queue;
 //   - nothing is written on connect - only setLevel() writes.
+//
+// There is no timer in here, because a data field is not allowed one. The host calls
+// onTick() once a second instead.
 (:real)
 class BleTransport extends BluetoothLowEnergy.BleDelegate {
 
-    private const TICK_MS = 3000;
-    private const CONNECT_TIMEOUT_MS = 30000;
+    // Housekeeping runs on every third call of onTick().
+    private const TICKS_PER_CHECK = 3;
+    // Measured on a fenix 6S Pro inside an activity: 30 s from pairDevice() to the watch
+    // reporting the connection, of which 25 s pass after the link is already up. With a
+    // limit of 30 s the data field never connected: every attempt was dropped 25 s after
+    // its link came up. Keep a wide margin.
+    private const CONNECT_TIMEOUT_MS = 90000;
     private const OP_TIMEOUT_MS = 10000;
     // How long to keep looking for a second pack once one is connected.
     private const SEARCH_MORE_MS = 45000;
@@ -58,6 +66,7 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
     private var _serviceUuid as Uuid;
     private var _heatUuid as Uuid;
     private var _batteryUuid as Uuid;
+    private var _temperatureUuid as Uuid;
 
     private var _links as Array<Link> = [] as Array<Link>;
     private var _ops as Array<Op> = [] as Array<Op>;
@@ -70,7 +79,7 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
     private var _pendingDevice as Device? = null;
     private var _pendingSince as Number = 0;
 
-    private var _timer as Timer.Timer? = null;
+    private var _ticks as Number = 0;
     private var _running as Boolean = false;
     private var _scanning as Boolean = false;
     private var _searchUntil as Number = 0;
@@ -81,6 +90,7 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
         _serviceUuid = Protocol.uuid(Protocol.CODE_SERVICE);
         _heatUuid = Protocol.uuid(Protocol.CODE_HEAT);
         _batteryUuid = Protocol.uuid(Protocol.CODE_BATTERY);
+        _temperatureUuid = Protocol.uuid(Protocol.CODE_TEMPERATURE);
     }
 
     public function start() as Void {
@@ -90,28 +100,25 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
                 :uuid => _serviceUuid,
                 :characteristics => [
                     { :uuid => _heatUuid, :descriptors => [BluetoothLowEnergy.cccdUuid()] },
-                    { :uuid => _batteryUuid, :descriptors => [BluetoothLowEnergy.cccdUuid()] }
+                    { :uuid => _batteryUuid, :descriptors => [BluetoothLowEnergy.cccdUuid()] },
+                    { :uuid => _temperatureUuid, :descriptors => [BluetoothLowEnergy.cccdUuid()] }
                 ]
             });
         } catch (e) {
+            trace("profile error");
             _model.note = "profile error";
             _model.changed();
             return;
         }
+        trace("start");
         _running = true;
         _searchUntil = System.getTimer() + SEARCH_MORE_MS;
-        var timer = new Timer.Timer();
-        timer.start(method(:onTick), TICK_MS, true);
-        _timer = timer;
         updateScan();
     }
 
     public function stop() as Void {
+        trace("stop");
         _running = false;
-        if (_timer != null) {
-            (_timer as Timer.Timer).stop();
-            _timer = null;
-        }
         setScan(false);
         for (var i = 0; i < _links.size(); i++) {
             unpair(_links[i].device);
@@ -151,6 +158,7 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
     }
 
     public function onProfileRegister(uuid as Uuid, status as Status) as Void {
+        trace("profile status " + status);
         if (status != BluetoothLowEnergy.STATUS_SUCCESS) {
             _model.note = "profile " + status;
             _model.changed();
@@ -158,7 +166,12 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
     }
 
     public function onScanStateChange(scanState as ScanState, status as Status) as Void {
-        _scanning = (scanState == BluetoothLowEnergy.SCAN_STATE_SCANNING);
+        var scanning = (scanState == BluetoothLowEnergy.SCAN_STATE_SCANNING);
+        if (scanning != _scanning) {
+            // Not asked for by setScan(): another app, or the watch itself.
+            trace("scan turned " + (scanning ? "on" : "off") + " from outside, status " + status);
+        }
+        _scanning = scanning;
     }
 
     public function onScanResults(scanResults as Iterator) as Void {
@@ -180,8 +193,10 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
                     _pendingScan = result;
                     _pendingDevice = device;
                     _pendingSince = System.getTimer();
+                    trace("found a pack, connecting");
                 }
             } catch (e) {
+                trace("connect error");
                 _model.note = "connect error";
             }
             updateScan();
@@ -190,7 +205,11 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
     }
 
     public function onConnectedStateChanged(device as Device, state as BluetoothLowEnergy.ConnectionState) as Void {
-        if (state == BluetoothLowEnergy.CONNECTION_STATE_CONNECTED) {
+        var connected = (state == BluetoothLowEnergy.CONNECTION_STATE_CONNECTED);
+        trace((connected ? "connected" : "disconnected")
+            + (_pendingScan != null ? ", attempt pending" : ", no attempt pending")
+            + ", packs " + _links.size());
+        if (connected) {
             var scan = _pendingScan;
             _pendingScan = null;
             _pendingDevice = null;
@@ -211,6 +230,7 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
     }
 
     public function onCharacteristicRead(characteristic as Characteristic, status as Status, value as ByteArray) as Void {
+        trace("read status " + status + ", value " + value);
         var op = _current;
         if (op != null) {
             if (status == BluetoothLowEnergy.STATUS_SUCCESS && value.size() > 0) {
@@ -219,8 +239,12 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
                     _model.packReported();
                 } else if (op.kind == :readBattery) {
                     op.link.pack.battery = value[0];
+                } else if (op.kind == :readTemperature) {
+                    op.link.pack.temperature = Protocol.temperature(value[0]);
                 }
-            } else {
+            } else if (op.kind != :readTemperature) {
+                // The temperature is an extra: a pack that will not give it is still
+                // a pack, so that failure is not shown as an error.
                 report(status);
             }
         }
@@ -228,6 +252,7 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
     }
 
     public function onCharacteristicWrite(characteristic as Characteristic, status as Status) as Void {
+        trace("write status " + status);
         var op = _current;
         if (op != null && op.kind == :write) {
             if (status == BluetoothLowEnergy.STATUS_SUCCESS) {
@@ -253,6 +278,7 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
     }
 
     public function onDescriptorWrite(descriptor as Descriptor, status as Status) as Void {
+        trace("subscribe status " + status);
         finish();
     }
 
@@ -264,25 +290,47 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
         for (var i = 0; i < _links.size(); i++) {
             var link = _links[i];
             if (characteristic.equals(link.heat)) {
+                trace("level notified, " + value[0]);
                 link.pack.level = value[0];
+                _model.packReported();
             } else if (characteristic.equals(link.battery)) {
+                trace("battery notified, " + value[0]);
                 link.pack.battery = value[0];
+                _model.packReported();
+            } else if (characteristic.equals(link.temperature)) {
+                // A pack may send this often. Only a change is worth a redraw and a
+                // line in the log.
+                var degrees = Protocol.temperature(value[0]);
+                if (degrees != link.pack.temperature) {
+                    trace("temperature notified, raw " + value[0]);
+                    link.pack.temperature = degrees;
+                    _model.changed();
+                }
             }
         }
-        _model.packReported();
     }
 
     // Housekeeping: give up on a stuck connection attempt or request.
     public function onTick() as Void {
+        if (!_running) {
+            return;
+        }
+        _ticks++;
+        if (_ticks < TICKS_PER_CHECK) {
+            return;
+        }
+        _ticks = 0;
         var now = System.getTimer();
         if (_pendingDevice != null && now - _pendingSince > CONNECT_TIMEOUT_MS) {
             unpair(_pendingDevice as Device);
             _pendingScan = null;
             _pendingDevice = null;
+            trace("connect timeout");
             _model.note = "connect timeout";
         }
         if (_current != null && now - _currentSince > OP_TIMEOUT_MS) {
             _current = null;
+            trace("no reply to a request");
             _model.note = "no reply";
             _model.userDone();
         }
@@ -295,6 +343,7 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
         var service = device.getService(_serviceUuid);
         var heat = (service != null) ? service.getCharacteristic(_heatUuid) : null;
         if (service == null || heat == null) {
+            trace("not a pack: service " + (service != null) + ", heat level " + (heat != null));
             _model.note = "not a pack";
             unpair(device);
             return;
@@ -303,13 +352,17 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
         var link = new Link(device, scan, pack);
         link.heat = heat;
         link.battery = service.getCharacteristic(_batteryUuid);
+        link.temperature = service.getCharacteristic(_temperatureUuid);
         _links.add(link);
         _model.packs.add(pack);
+        trace("pack " + _links.size() + " accepted, reading");
         _model.note = "";
         _ops.add(new Op(link, :readHeat));
         _ops.add(new Op(link, :readBattery));
+        _ops.add(new Op(link, :readTemperature));
         _ops.add(new Op(link, :subHeat));
         _ops.add(new Op(link, :subBattery));
+        _ops.add(new Op(link, :subTemperature));
     }
 
     // Drops links whose device is gone. Returns true if any was removed.
@@ -328,6 +381,7 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
             }
         }
         if (removed) {
+            trace("pack lost, left " + links.size());
             _links = links;
             _model.packs = packs;
             if (!writesPending()) {
@@ -380,11 +434,18 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
                 (link.battery as Characteristic).requestRead();
                 return true;
             }
+            if (op.kind == :readTemperature && link.temperature != null) {
+                (link.temperature as Characteristic).requestRead();
+                return true;
+            }
             if (op.kind == :subHeat) {
                 return subscribe(link.heat);
             }
             if (op.kind == :subBattery) {
                 return subscribe(link.battery);
+            }
+            if (op.kind == :subTemperature) {
+                return subscribe(link.temperature);
             }
             if (op.kind == :write && link.heat != null && link.pendingLevel != null) {
                 _sentLevel = link.pendingLevel as Number;
@@ -434,6 +495,7 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
         if (on == _scanning) {
             return;
         }
+        trace(on ? "scan on" : "scan off");
         _scanning = on;
         BluetoothLowEnergy.setScanState(on ? BluetoothLowEnergy.SCAN_STATE_SCANNING : BluetoothLowEnergy.SCAN_STATE_OFF);
     }
@@ -463,6 +525,12 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
             }
         }
         return false;
+    }
+
+    // One line per event for the app's log on the watch, stamped with seconds of uptime.
+    // The watch keeps it only if GARMIN/Apps/LOGS/<name of the .prg>.TXT exists.
+    private function trace(text as String) as Void {
+        System.println("ble " + (System.getTimer() / 1000) + " " + text);
     }
 
     private function unpair(device as Device) as Void {

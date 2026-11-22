@@ -64,19 +64,69 @@ example an issue or a pull request, decline.
 
 Update this section whenever it stops being true.
 
-- Widget: checked on a fenix 6S Pro against the emulator. Scan, connect, read,
-  notifications, level control and reconnect work.
+- Widget: on the watch against the emulator, with the code as it is now and one pack:
+  scan, connect, read, notifications and level control worked, and the owner saw the
+  page with its icons. Reconnecting after a lost link was last
+  checked before the clock moved into the app.
+- Data field (`datafield/`): on the watch against the emulator, with the code as it is
+  now and one pack: it found the pack, connected, read, followed notifications, drew
+  its values during an activity, which the owner saw, and recorded `heat_level`,
+  `pack_battery`, `gear_temperature` and the session field `pack_battery_used` into the
+  activity's FIT file. It used 25 KB of its 128 KB. It gets the transport as `Ticker`,
+  a type that has only `onTick()`, so its code has nothing to write to a pack with;
+  keep it that way.
+- Found on the watch on 2026-11-22:
+  - The watch reports a connection 30 to 38 s after `pairDevice()`, in the widget and
+    in the field alike (six measurements). With the old limit of 30 s the field never
+    connected and the widget sometimes needed a second attempt. The limit is 90 s now.
+  - The level cannot be changed from the watch while an activity records. A data field
+    gets no input, and the watch does not open widgets then: a long press of BACK shows
+    the widget list, but its entries do not open (the owner's observation). The pack's
+    own button works, and the field follows it.
+  - Showing the widget list can still start a widget app: during one recording the
+    Thermic widget ran for 15 s without being opened. It found no pack, because the
+    field held it and the emulator does not advertise while connected.
+  - **Open defect:** in that recording the field's fields vanished from the FIT records
+    at the second the widget app stopped, and the session field was never written. The
+    field kept running and kept its link. In a recording during which no widget app
+    ran, nothing was lost. Cause unknown. The watch writes application id zero for a
+    side-loaded app (seen in the file), so the suspicion is that stopping one
+    side-loaded app clears the recording of another. Not reproduced on purpose yet. To
+    do so: record, long-press BACK and move through the widget list onto the Thermic
+    entry, and in another recording onto a widget from the store. The field logs its
+    timer events and one line a minute for this; cut that down once this is understood.
+  - BACK pressed during an activity records a lap.
+  - The watch calls a data field's `onStop()` twice, and never called `onShow()` or
+    `onHide()` of the simple data field.
+  - The widget list starts a widget app when its entry is shown and again when it is
+    opened; the log shows two starts a second apart.
 - Real packs: untested. The deciding question is whether a pack accepts a central that
   has not bonded. If it does not, the widget shows `needs bonding` and the probe shows
   `write fail 18` or `19`. Direct Bluetooth from Connect IQ 3.x is then impossible, and
   the fallback is a relay: the watch talks to a companion Android app that holds the
   bond. Only `common/source/BleTransport.mc` would be replaced.
 - Two packs at once: implemented, never run.
-- Next: a data field in `datafield/`, next to `widget/`, reusing `common/`. Constraints
-  already established: FIT recording is open to data fields and watch apps, not to
-  widgets; a data field gets no button input on this watch, so by rule 1 it never
-  writes; widget and data field would need the same Bluetooth link. First experiment:
-  whether both can use one pack at the same time.
+- Known gap: while no pack is connected the transport scans without end. In a widget
+  that lasts seconds, in a data field it can last a whole activity. What that costs the
+  watch battery is unmeasured. Add a duty cycle before the field is used for long
+  activities.
+- Temperature at the gear (characteristic `0013`): on the watch against the emulator
+  both apps read it, followed its notifications and showed it, and the field recorded
+  it as `gear_temperature`. Whether real gear reports a temperature is unknown: the
+  phone app has a case for gear without a sensor, see `docs/protocol.md`.
+- Display for two packs: the widget's main page has a column for each pack under a foot
+  icon, with a thermometer by the level and a battery by the charge. The data field
+  draws itself, numbers only, the first pack in the left half of its cell and the
+  second in the right. The two-pack pages are **checked in the simulator only**, with
+  the demo builds, the field in all ten layouts. On the watch only the one-pack pages
+  have been seen: there is one emulator, and two real packs have never been connected
+  at once.
+- Open: which pack is on which foot. Nothing in a pack says so, and Connect IQ gives no
+  device address, so the first pack to connect is shown on the left and the sides can
+  swap between sessions. With real packs, look for something stable in the advertising
+  data or in the device name.
+- Unknown: whether Garmin Connect shows recorded fields of an app that is not in the
+  store. `tools/fitdump.py` shows what is in the file either way.
 - Open with the owner: licence, repository description.
 
 ## Build and check
@@ -86,14 +136,20 @@ SDK="$(tr -d '\n' < ~/.Garmin/ConnectIQ/current-sdk.cfg)"
 "$SDK/bin/monkeyc" -d fenix6spro -f widget/monkey.jungle      -o widget/bin/THERMIC.prg  -y "$KEY" -w
 "$SDK/bin/monkeyc" -d fenix6spro -f widget/monkey-demo.jungle -o widget/bin/THERMICD.prg -y "$KEY" -w
 "$SDK/bin/monkeyc" -d fenix6spro -f probe/monkey.jungle       -o probe/bin/TPROBE.prg    -y "$KEY" -w
+"$SDK/bin/monkeyc" -d fenix6spro -f datafield/monkey.jungle      -o datafield/bin/THERMICF.prg  -y "$KEY" -w
+"$SDK/bin/monkeyc" -d fenix6spro -f datafield/monkey-demo.jungle -o datafield/bin/THERMICFD.prg -y "$KEY" -w
 ```
 
 `$KEY` is the developer key. It lives outside the repository; its path is in
 `private/LOCAL.md`, or ask the owner.
 
-- After every change build all three targets above. Expect zero warnings.
+- After every change build every target above. Expect zero warnings. A clean build is
+  not enough: run each app the change touches in the simulator at least once, because
+  some errors only show at start (see `Toybox.Timer` below).
 - Screen or input change: run the demo build through `tools/simulator/run.sh` and look
   at the screenshots.
+- Recording change: record an activity in the simulator with the demo field, save the
+  FIT file and read it with `tools/fitdump.py`. The README has the recipe.
 - Bluetooth change: the simulator has no Bluetooth, so this needs the watch and
   `emulator/pack_emulator.py`. Sideloading is done together with the owner. Compare the
   emulator's log with `GARMIN/Apps/LOGS/<NAME>.TXT` from the watch. Until that run
@@ -116,6 +172,24 @@ Connect IQ:
 - A symbol named like a private method, `:write` next to `write()`, triggers a warning.
   Name queue symbols differently.
 - Connect IQ takes one GATT request at a time. Queue them.
+- A module can be closed to an app type, and the compiler does not check it.
+  `Toybox.Timer` is closed to data fields: the build was clean and the field died at
+  start with "Permission Required". Look at "App Types" on the module's page in the API
+  documentation before using a module in a new kind of app. This is why the transports
+  have no timer and the host calls `onTick()`: the widget from a timer, the data field
+  from `compute()`.
+- A data field has 128 KB on `fenix6spro` and 32 KB on `fenix6s`, so the field's
+  manifest lists only the first. The real build idles at 17 KB in the simulator.
+- The simulator's menus and dialogs are separate windows. `shot:` does not see them;
+  `screen:` does, and `tap:` clicks at the coordinates read off such a screenshot.
+- The simulator stops the app while one of its menus is open. Count a `wait:` from the
+  moment the menu closes, or the shot shows an earlier state than its name says.
+- The simulator starts with statute units, so temperatures come out in Fahrenheit.
+  `click:73,12 wait:1 tap:112,58 wait:1 key:Right key:Return` switches it to metric.
+- A data field that draws itself is not told where its cell is, only which edges of
+  the screen the cell touches (`getObscurityFlags()`). On a round screen a line near
+  the top or the bottom is much shorter than the cell is wide; `HeatField.room()` works
+  the usable stretch out from those flags.
 - On a widget's main page the watch delivers behaviours (`onSelect`, `onNextPage`,
   `onPreviousPage`) but no raw key events.
 - The simulator swallows the first key press after an app loads.

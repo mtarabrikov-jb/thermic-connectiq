@@ -1,0 +1,10 @@
+<strings>
+    <string id="AppName">Thermic</string>
+    <string id="HeatLabel">Heat level</string>
+    <string id="HeatUnits">level</string>
+    <string id="BatteryLabel">Pack battery</string>
+    <string id="BatteryUsedLabel">Pack battery used</string>
+    <string id="Percent">%</string>
+    <string id="TemperatureLabel">Gear temperature</string>
+    <string id="Celsius">°C</string>
+</strings>

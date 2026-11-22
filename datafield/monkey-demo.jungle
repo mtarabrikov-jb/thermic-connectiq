@@ -1,0 +1,6 @@
+# Demo build: two made-up packs instead of Bluetooth, for checking the field
+# in the simulator without any hardware.
+project.manifest = manifest.xml
+base.sourcePath = source;../common/source
+base.resourcePath = resources
+base.excludeAnnotations = real

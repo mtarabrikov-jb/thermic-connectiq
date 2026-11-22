@@ -9,9 +9,19 @@ Unofficial. Not affiliated with or endorsed by Therm-ic or Garmin.
 
 Experimental, and **not yet tried on real hardware**.
 
-- The widget works end to end against the pack emulator in this repository, on a
-  fenix 6S Pro (Connect IQ 3.4.5): find the pack, connect, read level and battery,
-  follow notifications, set the level, reconnect.
+- The widget and the data field both work against the pack emulator in this repository,
+  on a fenix 6S Pro (Connect IQ 3.4.5). The widget finds the pack, connects, reads level
+  and battery, follows notifications and sets the level. The data field does the same
+  without ever writing, shows the values during an activity and records them into the
+  activity's FIT file.
+- While an activity records, the level cannot be changed from the watch: a data field
+  gets no button presses, and this watch does not open widgets then. Use the button on
+  the pack; the field follows it.
+- The temperature shown is what a pack calls its external temperature. Whether real
+  socks have a sensor for it is not known; the phone app has a case for gear without one.
+- Known problem: in one recording the recorded fields stopped at the moment the widget
+  app shut down, after the widget list had started it. Not understood yet. Until it is,
+  stay out of the widget list while recording.
 - The official phone app works against the same emulator, which is how the protocol
   was confirmed.
 - Open question: the phone app bonds with the pack, and watches on Connect IQ 3.x cannot
@@ -20,22 +30,39 @@ Experimental, and **not yet tried on real hardware**.
   [docs/protocol.md](docs/protocol.md).
 - Two packs at once (left and right) are implemented but untested.
 
+## Screens
+
+![The widget and the data field in the simulator](docs/screens.png)
+
+Taken in the simulator with made-up packs. Top row: the widget with two packs. Second
+row: the widget and the data field with one pack. Below: the data field with two packs
+in each of the watch's ten layouts.
+
 ## What is here
 
 | Path        | What |
 |-------------|------|
-| `widget/`   | The widget: level and battery on the main page, level control on a second page. |
-| `common/`   | Code shared by the apps: protocol constants, state model, Bluetooth and demo transports. |
-| `probe/`    | Diagnostic widget that shows every step of scan, connect, read and write. |
-| `emulator/` | A Bluetooth LE peripheral that imitates a pack, for Linux with BlueZ. |
-| `tools/`    | Headless simulator, SDK Manager container, icon helper. |
-| `docs/`     | Protocol notes. |
-
-A data field for recording during an activity is planned next to `widget/`.
+| `widget/`    | The widget: level and battery on the main page, level control on a second page. |
+| `datafield/` | A data field: level and battery on an activity's data screen, recorded with the activity. |
+| `common/`    | Code shared by the apps: protocol constants, state model, Bluetooth and demo transports. |
+| `probe/`     | Diagnostic widget that shows every step of scan, connect, read and write. |
+| `emulator/`  | A Bluetooth LE peripheral that imitates a pack, for Linux with BlueZ. |
+| `tools/`     | Headless simulator, SDK Manager container, icon helper, FIT file dump. |
+| `docs/`      | Protocol notes. |
 
 ## Using the widget
 
-Main page: the level as a number and a ring, battery of each pack underneath.
+Main page with one pack: the level as a number and a ring, and under it the temperature
+at the gear and the battery.
+
+Main page with two packs: a column for each under a left and a right foot. Each has its
+own half of the ring, its level, its temperature and its battery.
+
+The temperature is left out when the gear reports none.
+
+The watch cannot tell which pack is on which foot: the first one to connect is shown on
+the left, and that can differ from one time to the next. Press the button on a pack to
+see which column changes.
 
 - START opens the control page.
 - UP and DOWN are left to the watch, so the widget loop keeps scrolling.
@@ -49,6 +76,37 @@ Control page:
 The widget never writes to a pack on its own. A level changed with the button on the
 pack shows up on the watch, and the control page continues from that value.
 
+## Using the data field
+
+Add the field named Thermic to a data screen of an activity. It shows numbers only, with
+no label and no icons, as large as its cell allows:
+
+- one pack: `7 24°` with `64%` under it - level 7, 24 degrees at the gear, battery at
+  64 percent.
+- two packs: the same twice, the first pack in the left half of the cell and the second
+  in the right half.
+- `7` without a temperature when the gear reports none.
+- `--` - no pack found yet. `...` - connecting.
+- a short message such as `needs bonding` when something went wrong.
+
+As in the widget, the first pack to connect is the one on the left.
+
+With every record of the activity it stores the level, the temperature and the battery,
+and in the summary the battery used since the timer started. With two packs it keeps one
+value of each kind: the highest level, the lowest temperature and the lowest battery.
+The temperature is recorded in degrees Celsius whatever unit the watch shows. While no
+pack is connected the recorded fields hold FIT's "no value", so the recording has a gap
+there.
+
+The field only listens. A data field gets no button presses on a watch with buttons, so
+it cannot change the level and never writes to a pack.
+
+It is built for the fenix 6S Pro only: a data field has 128 KB there and 32 KB on the
+plain fenix 6S.
+
+Whether Garmin Connect displays these fields for an app that is not in the Connect IQ
+Store is not known. `tools/fitdump.py activity.fit` prints what is in the file.
+
 ## Building
 
 Needs the Connect IQ SDK with the device files for your watch, and a developer key.
@@ -60,6 +118,7 @@ openssl pkcs8 -topk8 -inform PEM -outform DER -in developer_key.pem -out develop
 
 SDK="$(tr -d '\n' < ~/.Garmin/ConnectIQ/current-sdk.cfg)"
 "$SDK/bin/monkeyc" -d fenix6spro -f widget/monkey.jungle -o widget/bin/THERMIC.prg -y developer_key.der -w
+"$SDK/bin/monkeyc" -d fenix6spro -f datafield/monkey.jungle -o datafield/bin/THERMICF.prg -y developer_key.der -w
 ```
 
 Keep the key out of the repository. `.gitignore` covers `*.der` and `*.pem`.
@@ -134,6 +193,21 @@ tools/simulator/run.sh widget/bin/THERMICD.prg fenix6spro /tmp/shots \
 ```
 
 The simulator has no Bluetooth; use it with the demo build.
+
+The data field has a demo build too (`datafield/monkey-demo.jungle`). To check what it
+records, let the simulator record an activity and save the FIT file. The steps below
+open Simulation > Activity Data and press Start, Stop, Save and Save Fit Data:
+
+```bash
+tools/simulator/run.sh datafield/bin/THERMICFD.prg fenix6spro /tmp/shots \
+    click:150,12 wait:1 click:176,58 wait:2 \
+    tap:60,275 wait:15 tap:60,275 wait:2 tap:267,275 wait:3 \
+    tap:423,172 wait:3 key:ctrl+a type:/work/out/session.fit key:Return wait:3
+python3 tools/fitdump.py /tmp/shots/session.fit
+```
+
+The coordinates fit the simulator of SDK 9.3.0. If they stop working, add a
+`screen:<name>` step to see where the buttons are.
 
 ## Branding
 

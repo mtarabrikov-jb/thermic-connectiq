@@ -7,7 +7,10 @@
 #   key:<name>     xdotool key name; Return = START, Escape = BACK, Up / Down, m = MENU
 #   wait:<seconds>
 #   shot:<name>    screenshot of the simulator window to <outdir>/<name>.png
+#   screen:<name>  screenshot of the whole virtual display; unlike shot: it shows open menus
 #   click:<x>,<y>  mouse click, window coordinates
+#   tap:<x>,<y>    mouse click, display coordinates as read off a screen: shot; for dialogs
+#   type:<text>    types the text into whatever has the focus
 #
 # Expects the host's ~/.Garmin/ConnectIQ mounted read-only at /garmin.
 SDK=$1; PRG=$2; DEV=$3; OUT=$4; shift 4
@@ -57,7 +60,10 @@ for s in "$@"; do
     key:*)   xdotool key "${s#key:}"; sleep 0.5 ;;
     wait:*)  sleep "${s#wait:}" ;;
     click:*) c="${s#click:}"; xdotool mousemove --window "$WIN" "${c%,*}" "${c#*,}" click 1; sleep 0.5 ;;
+    tap:*)   c="${s#tap:}"; xdotool mousemove "${c%,*}" "${c#*,}" click 1; sleep 0.5 ;;
+    type:*)  xdotool type --delay 40 "${s#type:}"; sleep 0.5 ;;
     shot:*)  import -window "$WIN" "$OUT/${s#shot:}.png" 2>/tmp/import.log && echo "shot ${s#shot:}" || cat /tmp/import.log ;;
+    screen:*) import -window root "$OUT/${s#screen:}.png" 2>/tmp/import.log && echo "screen ${s#screen:}" || cat /tmp/import.log ;;
   esac
 done
 

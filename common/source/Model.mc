@@ -6,6 +6,8 @@ import Toybox.WatchUi;
 class Pack {
     public var level as Number? = null;
     public var battery as Number? = null;
+    // Degrees Celsius at the heated gear; null when the pack reports no reading.
+    public var temperature as Number? = null;
 }
 
 // Anything that can find packs and set their level. The views only use this
@@ -13,6 +15,9 @@ class Pack {
 typedef Transport as interface {
     function start() as Void;
     function stop() as Void;
+    // Housekeeping. The host calls it once a second: a widget from a timer, a data
+    // field from compute(), because a data field is not allowed a timer of its own.
+    function onTick() as Void;
     function setLevel(level as Number) as Void;
 };
 

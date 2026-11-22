@@ -100,6 +100,11 @@ Modes: target temperature is done by the pack. The app writes `0015` = 1 and `00
 target + 40. Boost, eco and motion appear to be timers inside the app that write plain
 heat levels; that is read from the app's code and data model, not observed.
 
+External temperature: the app takes a reading as present only from -20 to 214 degrees
+Celsius. Outside that range it acts as if the product had no sensor; a raw `FF` gives
+215 and falls outside. It shows one temperature for each pack, not a combined one. This
+is read from the app's code, not observed.
+
 Socks, soles and gloves are paired products: the app wants two packs and will not finish
 pairing with one. Nothing in a pack marks it as left or right; the app assigns that.
 
@@ -119,6 +124,15 @@ Measured on a fenix 6S Pro, Connect IQ 3.4.5.
 - Every read arrives at the peripheral twice.
 - About 25 seconds pass between the link coming up and the first read.
 
+## What the apps here use
+
+- `0002` HEAT_LEVEL: read and notifications in both apps. The widget writes it, and only
+  after a button press.
+- `0005` BATTERY_LEVEL: read and notifications.
+- `0013` EXTERNAL_TEMPERATURE: read and notifications. Shown and recorded as the
+  temperature at the heated gear, within the range the phone app accepts. A pack that
+  lacks the characteristic or refuses the read is used without it.
+
 ## Unknown
 
 - **Whether a real pack lets an unbonded central read and write.** The app insists on
@@ -126,4 +140,7 @@ Measured on a fenix 6S Pro, Connect IQ 3.4.5.
   talk to it directly and needs a phone in between.
 - Whether a pack advertises as discoverable outside its pairing mode.
 - Whether a pack accepts more than one central at a time.
-- Units of the two-byte values, and what "external temperature" measures.
+- Units of the two-byte values.
+- What "external temperature" measures, and which products have a sensor for it. It is
+  the value a pack regulates by in its target temperature mode, which is why the apps
+  here take it for the temperature at the gear.

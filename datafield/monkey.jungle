@@ -1,0 +1,5 @@
+# Real build: listens to the packs over Bluetooth LE and records what they report.
+project.manifest = manifest.xml
+base.sourcePath = source;../common/source
+base.resourcePath = resources
+base.excludeAnnotations = demo

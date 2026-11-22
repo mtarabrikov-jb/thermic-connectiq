@@ -1,5 +1,4 @@
 import Toybox.Lang;
-import Toybox.Timer;
 
 (:demo)
 function makeTransport(model as Model) as Transport {
@@ -8,14 +7,19 @@ function makeTransport(model as Model) as Transport {
 
 // Stand-in for Bluetooth: two made-up packs appear one after another and follow
 // the requested level. Used to check the screens without hardware.
+//
+// Like the real transport it has no timer: the host calls onTick() once a second.
 (:demo)
 class DemoTransport {
 
-    // Tick (1.5 s each) at which the packs change level by themselves.
-    private const BUTTON_TICK = 8;
+    // Seconds after the start at which the two packs appear.
+    private const FIRST_PACK_TICK = 2;
+    private const SECOND_PACK_TICK = 3;
+    // Second at which the first pack changes level by itself.
+    private const BUTTON_TICK = 12;
 
     private var _model as Model;
-    private var _timer as Timer.Timer? = null;
+    private var _running as Boolean = false;
     private var _ticks as Number = 0;
     private var _apply as Boolean = false;
 
@@ -24,18 +28,13 @@ class DemoTransport {
     }
 
     public function start() as Void {
+        _running = true;
         _model.searching = true;
-        var timer = new Timer.Timer();
-        timer.start(method(:onTick), 1500, true);
-        _timer = timer;
         _model.changed();
     }
 
     public function stop() as Void {
-        if (_timer != null) {
-            (_timer as Timer.Timer).stop();
-            _timer = null;
-        }
+        _running = false;
     }
 
     public function setLevel(level as Number) as Void {
@@ -44,15 +43,22 @@ class DemoTransport {
     }
 
     public function onTick() as Void {
+        if (!_running) {
+            return;
+        }
         _ticks++;
-        if (_ticks == 1) {
-            add(3, 87);
-        } else if (_ticks == 2) {
-            add(3, 64);
+        if (_ticks == FIRST_PACK_TICK) {
+            add(3, 87, 24);
+        } else if (_ticks == SECOND_PACK_TICK) {
+            add(3, 64, 26);
             _model.searching = false;
-        } else if (_ticks == BUTTON_TICK) {
-            // Somebody pressed the button on the packs: they change level on their own.
-            setAll(7);
+        } else if (_ticks == BUTTON_TICK && _model.packs.size() > 0) {
+            // Somebody pressed the button on the first pack: it changes level on its
+            // own, and its gear gets warmer than the other.
+            _model.packs[0].level = 7;
+            for (var i = 0; i < _model.packs.size(); i++) {
+                _model.packs[i].temperature = 31 - 4 * i;
+            }
         }
         if (_apply && _model.target != null) {
             _apply = false;
@@ -69,10 +75,11 @@ class DemoTransport {
         }
     }
 
-    private function add(level as Number, battery as Number) as Void {
+    private function add(level as Number, battery as Number, temperature as Number) as Void {
         var pack = new Pack();
         pack.level = level;
         pack.battery = battery;
+        pack.temperature = temperature;
         _model.packs.add(pack);
     }
 }
