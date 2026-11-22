@@ -52,6 +52,9 @@ in each of the watch's ten layouts.
 
 ## Using the widget
 
+In the watch's list of widgets it shows its name only. It starts looking for packs once
+it is opened.
+
 Main page with one pack: the level as a number and a ring. Under it, line by line: the
 temperature at the gear, the battery with the temperature inside the pack next to it,
 and how long the pack expects its heat to last.
@@ -73,14 +76,23 @@ Level page:
 
 - UP and DOWN change the level, 0 to 10. Several quick presses become one write.
 - START switches the heat off, or back to the last level that was on.
-- MENU, a long press of UP, opens the temperature page.
+- MENU, a long press of UP, opens a menu with the two pages below.
 - BACK returns to the main page.
 
-Temperature page, for gear that reports a temperature:
+Target temperature page, for gear that reports a temperature:
 
 - UP and DOWN change the target, 15 to 35 degrees Celsius. The packs keep it.
 - START turns the regulation to that target on or off.
-- BACK returns to the level page.
+
+Diagnostics page: current consumption, capacity, the capacity the battery was designed
+for, heater resistance, the temperature of the fuel gauge chip and the lowest
+temperature inside the pack, now and before. Read when the page opens and again on
+START. Numbers are shown as the pack gives them where their unit is not known.
+
+A yellow warning sign takes the place of the thermometer when a pack says something is
+wrong, with a word about it on the bottom line: `heat blocked` when the pack does not
+let itself heat, `no heater?` when it reports a heater resistance of 65535. The second
+is a guess at what that value means.
 
 What a pack does with its level while it regulates, and whether it goes on regulating
 with nothing connected, is not known yet.
@@ -90,8 +102,8 @@ pack shows up on the watch, and the level page continues from that value.
 
 ## Using the data field
 
-Add the field named Thermic to a data screen of an activity. It shows numbers only, with
-no label and no icons, as large as its cell allows:
+Add the field named Thermic to a data screen of an activity. Under its label,
+`THERM-IC`, it shows numbers and no icons, as large as its cell allows:
 
 - one pack: `7 24°` with `64%` under it - level 7, 24 degrees at the gear, battery at
   64 percent.
@@ -101,6 +113,10 @@ no label and no icons, as large as its cell allows:
 - `--` - no pack found yet. `...` - connecting.
 - a short message such as `needs bonding` when something went wrong.
 
+A cell too low for three lines gets two: the label shares a line with the batteries,
+`THERM-IC 64%` or `87% THERM-IC 64%`. The label is left out only where it would make
+the numbers smaller: with two packs, in the lowest cell at the bottom of the screen.
+
 As in the widget, the first pack to connect is the one on the left.
 
 With every record of the activity it stores the level, the temperature and the battery,
@@ -109,6 +125,13 @@ value of each kind: the highest level, the lowest temperature and the lowest bat
 The temperature is recorded in degrees Celsius whatever unit the watch shows. While no
 pack is connected the recorded fields hold FIT's "no value", so the recording has a gap
 there.
+
+The field warns when a pack's battery is at 10 percent or below, and when a pack is
+lost. For ten seconds its cell turns to inverted colours and reads like a field of the
+watch itself, words above a value: `Heater battery low` over `9%`, or
+`Heater connection` over `LOST`. With two packs the value names the side, `right 9%`,
+and a lost pack reads `1 of 2 heaters` over `LOST`. In a narrow cell the words get
+shorter. The watch vibrates, and a pop-up with the same words is asked for as well.
 
 The field only listens. A data field gets no button presses on a watch with buttons, so
 it cannot change the level and never writes to a pack.
@@ -179,7 +202,11 @@ python3 emulator/pack_emulator.py --log session.log
 #   battery 50
 #   ext 31        temperature at the gear
 #   int 12        temperature inside the pack
+#   res 65535     heater resistance; this value is what "no heater?" reacts to
+#   allowed 0     the pack does not let itself heat
+#   drop          cut the link, as when the pack goes out of range
 #   show
+#   quit          cut the link and stop, as when the pack is switched off
 ```
 
 Requirements: BlueZ with a controller that supports the peripheral role, `python3-dbus`
@@ -209,8 +236,14 @@ saves screenshots, so screens can be checked without a watch:
 docker build -t ciq-sdkmanager:jammy tools/sdkmanager     # base image
 docker build -t ciq-sim:jammy tools/simulator
 tools/simulator/run.sh widget/bin/THERMICD.prg fenix6spro /tmp/shots \
-    wait:4 shot:a-main key:Return wait:1 shot:b-control key:Up wait:2 shot:c-up
+    shot:a-glance \
+    click:73,12 wait:1 tap:141,534 wait:1 key:Right key:Return wait:3 \
+    wait:4 shot:b-main key:Return wait:1 shot:c-level key:Up wait:2 shot:d-up
 ```
+
+The simulator starts the widget the way the watch's list of widgets does, as a glance.
+The second line of steps chooses Settings > Glance Launch Mode > Launch in Normal Mode,
+which opens it in full.
 
 The simulator has no Bluetooth; use it with the demo build.
 

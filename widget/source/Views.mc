@@ -104,13 +104,14 @@ class ControlDelegate extends WatchUi.BehaviorDelegate {
         return false;
     }
 
-    // MENU, a long press of UP: the target temperature page.
+    // MENU, a long press of UP: the way to the target temperature and to diagnostics.
     public function onMenu() as Boolean {
         flush();
-        System.println("control: menu, opening temperature page");
-        var state = new $.TargetState(_model);
-        WatchUi.pushView(new $.TemperatureView(_model, state),
-            new $.TemperatureDelegate(_transport, state), WatchUi.SLIDE_LEFT);
+        System.println("control: menu");
+        var menu = new WatchUi.Menu2({:title => "Thermic"});
+        menu.addItem(new WatchUi.MenuItem("Target temp", null, :temperature, null));
+        menu.addItem(new WatchUi.MenuItem("Diagnostics", null, :diagnostics, null));
+        WatchUi.pushView(menu, new $.MoreDelegate(_model, _transport), WatchUi.SLIDE_LEFT);
         return true;
     }
 

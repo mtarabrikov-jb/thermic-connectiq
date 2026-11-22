@@ -28,8 +28,10 @@ Console commands while running from a terminal:
   allowed 0|1  heating allowed flag
   ext T        external temperature, degrees Celsius
   int T        temperature inside the pack, degrees Celsius
+  res N        heater resistance as the pack reports it; 65535 for no heater
+  drop         cut the link, as when the pack goes out of range; it advertises again
   show         print current state
-  quit
+  quit         cut the link and stop, as when the pack is switched off
 """
 import argparse
 import datetime
@@ -126,9 +128,31 @@ def describe(kind, value):
     return str(value)
 
 
+# Centrals that have read or written a characteristic of the pack. These are the only
+# links the emulator ever cuts: the computer's other Bluetooth devices are not its
+# business.
+PEERS = set()
+
+
 def peer(options):
     path = str(options.get('device', ''))
+    if path:
+        PEERS.add(path)
     return 'peer ..' + path[-5:].replace('_', ':') if path else 'peer ?'
+
+
+def drop_links(bus):
+    """Disconnects the centrals that used the pack. Unregistering the services does not
+    do that: BlueZ keeps the link, and a watch goes on believing the pack is there."""
+    for path in sorted(PEERS):
+        tail = path[-5:].replace('_', ':')
+        try:
+            device = bus.get_object(BLUEZ, path)
+            if dbus.Interface(device, DBUS_PROP).Get('org.bluez.Device1', 'Connected'):
+                dbus.Interface(device, 'org.bluez.Device1').Disconnect()
+                log('LINK   dropped       peer ..%s' % tail)
+        except dbus.exceptions.DBusException as error:
+            log('WARN   could not drop the link to ..%s: %s' % (tail, error.get_dbus_name()))
 
 
 def dbus_bytes(data):
@@ -371,7 +395,10 @@ def builtin_device_info_disabled():
         return False
 
 
-def console(pack, loop):
+COMMANDS = 'commands: heat N | battery N | charge N | allowed 0|1 | ext T | int T | res N | drop | show | quit'
+
+
+def console(pack, loop, bus):
     def on_line(source, _condition):
         line = source.readline()
         if not line:
@@ -385,6 +412,8 @@ def console(pack, loop):
                 loop.quit()
             elif cmd == 'show':
                 pack.show()
+            elif cmd == 'drop':
+                drop_links(bus)
             elif cmd == 'heat' and 0 <= int(arg) <= 10:
                 pack.set('HEAT_LEVEL', int(arg))
             elif cmd == 'battery' and 0 <= int(arg) <= 100:
@@ -397,10 +426,12 @@ def console(pack, loop):
                 pack.set('EXTERNAL_TEMPERATURE', int(arg) + 40)
             elif cmd == 'int' and -40 <= int(arg) <= 215:
                 pack.set('INTERNAL_TEMPERATURE', int(arg) + 40)
+            elif cmd == 'res' and 0 <= int(arg) <= 65535:
+                pack.set('HEATER_RESISTANCE', int(arg))
             else:
-                print('commands: heat N | battery N | charge N | allowed 0|1 | ext T | int T | show | quit')
+                print(COMMANDS)
         except (TypeError, ValueError):
-            print('commands: heat N | battery N | charge N | allowed 0|1 | ext T | int T | show | quit')
+            print(COMMANDS)
         return True
 
     GLib.io_add_watch(sys.stdin, GLib.IO_IN, on_line)
@@ -501,11 +532,14 @@ def main():
     if args.duration > 0:
         GLib.timeout_add_seconds(args.duration, lambda: log('STOP   duration reached') or loop.quit() or False)
     if sys.stdin.isatty() and not args.selftest:
-        console(pack, loop)
+        console(pack, loop, bus)
 
     try:
         loop.run()
     finally:
+        # First the links, as a pack that is switched off does: a central then sees
+        # the pack go, not a pack whose services vanished.
+        drop_links(bus)
         if state['adv']:
             try:
                 adv_mgr.UnregisterAdvertisement(adv.path)

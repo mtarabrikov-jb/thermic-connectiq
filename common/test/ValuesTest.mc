@@ -31,3 +31,17 @@ function wordIsTwoBytesLowFirst(logger as Test.Logger) as Boolean {
     return Protocol.word([0x2d, 0x00]b) == 45 && Protocol.word([0x00, 0x01]b) == 256
         && Protocol.word([0x05]b) == null;
 }
+
+(:test)
+function troubleNamesWhatAPackSaysIsWrong(logger as Test.Logger) as Boolean {
+    var pack = new Pack();
+    var nothing = pack.trouble().equals("");
+    pack.resistance = 840;
+    pack.allowed = true;
+    var fine = pack.trouble().equals("");
+    pack.allowed = false;
+    var blocked = pack.trouble().equals("heat blocked");
+    pack.resistance = Protocol.RESISTANCE_OPEN;
+    var open = pack.trouble().equals("no heater?");
+    return nothing && fine && blocked && open;
+}

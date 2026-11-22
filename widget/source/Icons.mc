@@ -36,6 +36,16 @@ module Icons {
         dc.drawLine(x + 4, y + 10, x + 8, y + 10);
     }
 
+    // A warning sign, 17 wide and 16 high, in place of the thermometer when a pack says
+    // something is wrong; x is its middle and y its top. Sets its own colours.
+    function warning(dc as Dc, x as Number, y as Number) as Void {
+        dc.setColor(Graphics.COLOR_YELLOW, Graphics.COLOR_TRANSPARENT);
+        dc.fillPolygon([[x, y], [x - 8, y + 15], [x + 8, y + 15]]);
+        dc.setColor(Graphics.COLOR_BLACK, Graphics.COLOR_TRANSPARENT);
+        dc.fillRectangle(x - 1, y + 5, 2, 6);
+        dc.fillRectangle(x - 1, y + 12, 2, 2);
+    }
+
     const CLOCK_SIZE = 11;
 
     // A clock face showing a little past twelve; x is its left edge and y its top.

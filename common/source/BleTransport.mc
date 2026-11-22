@@ -11,11 +11,9 @@ class Link {
     public var heat as Characteristic? = null;
     public var battery as Characteristic? = null;
     public var temperature as Characteristic? = null;
-    // Only looked up when the model asks for details.
-    public var remaining as Characteristic? = null;
-    public var inside as Characteristic? = null;
-    public var regulation as Characteristic? = null;
-    public var goal as Characteristic? = null;
+    // Every other characteristic, by its code. Only filled when the model asks for
+    // details.
+    public var others as Dictionary<Number, Characteristic> = {} as Dictionary<Number, Characteristic>;
     // Values waiting to be written; null when nothing is pending.
     public var pendingLevel as Number? = null;
     public var pendingTarget as Number? = null;
@@ -33,10 +31,13 @@ class Link {
 class Op {
     public var link as Link;
     public var kind as Symbol;
+    // For :readOther and :subOther the code of the characteristic, otherwise 0.
+    public var code as Number;
 
-    public function initialize(newLink as Link, newKind as Symbol) {
+    public function initialize(newLink as Link, newKind as Symbol, newCode as Number) {
         link = newLink;
         kind = newKind;
+        code = newCode;
     }
 }
 
@@ -54,6 +55,10 @@ function makeTransport(model as Model) as Transport {
 //   - nothing is written on connect. Only setLevel(), setTarget() and setRegulation()
 //     write, and each is called for a press of a button.
 //
+// Level, battery and the temperature at the gear are what every app gets, and each has
+// its own code path. Everything else is an extra for an app that sets Model.details:
+// it is kept by code in Link.others, read with :readOther and decoded in store().
+//
 // There is no timer in here, because a data field is not allowed one. The host calls
 // onTick() once a second instead.
 (:real)
@@ -67,19 +72,31 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
     // its link came up. Keep a wide margin.
     private const CONNECT_TIMEOUT_MS = 90000;
     private const OP_TIMEOUT_MS = 10000;
-    // The temperature inside a pack has no notifications. It is read again on every
-    // tenth round of housekeeping, which is every half a minute.
-    private const INSIDE_EVERY_CHECKS = 10;
+    // What has no notifications is read again on every tenth round of housekeeping,
+    // which is every half a minute.
+    private const POLL_EVERY_CHECKS = 10;
+
+    // The extras, by what is done with them.
+    // Read when a pack connects:
+    private var _detailCodes as Array<Number> = [Protocol.CODE_REMAINING, Protocol.CODE_INSIDE,
+        Protocol.CODE_REGULATION, Protocol.CODE_TARGET, Protocol.CODE_RESISTANCE,
+        Protocol.CODE_ALLOWED] as Array<Number>;
+    // of those, the ones a pack sends notifications for,
+    private var _notifyCodes as Array<Number> = [Protocol.CODE_REMAINING,
+        Protocol.CODE_RESISTANCE] as Array<Number>;
+    // and the ones it does not, which are read again every half a minute.
+    private var _pollCodes as Array<Number> = [Protocol.CODE_INSIDE,
+        Protocol.CODE_ALLOWED] as Array<Number>;
+    // Read only when readDiagnostics() asks:
+    private var _diagnosticCodes as Array<Number> = [Protocol.CODE_CAPACITY, Protocol.CODE_CURRENT,
+        Protocol.CODE_GAUGE, Protocol.CODE_DESIGN, Protocol.CODE_COLDEST,
+        Protocol.CODE_COLDEST_BEFORE] as Array<Number>;
 
     private var _model as Model;
     private var _serviceUuid as Uuid;
     private var _heatUuid as Uuid;
     private var _batteryUuid as Uuid;
     private var _temperatureUuid as Uuid;
-    private var _remainingUuid as Uuid;
-    private var _insideUuid as Uuid;
-    private var _regulationUuid as Uuid;
-    private var _goalUuid as Uuid;
 
     private var _links as Array<Link> = [] as Array<Link>;
     private var _ops as Array<Op> = [] as Array<Op>;
@@ -112,10 +129,6 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
         _heatUuid = Protocol.uuid(Protocol.CODE_HEAT);
         _batteryUuid = Protocol.uuid(Protocol.CODE_BATTERY);
         _temperatureUuid = Protocol.uuid(Protocol.CODE_TEMPERATURE);
-        _remainingUuid = Protocol.uuid(Protocol.CODE_REMAINING);
-        _insideUuid = Protocol.uuid(Protocol.CODE_INSIDE);
-        _regulationUuid = Protocol.uuid(Protocol.CODE_REGULATION);
-        _goalUuid = Protocol.uuid(Protocol.CODE_TARGET);
     }
 
     public function start() as Void {
@@ -128,11 +141,20 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
                 { :uuid => _temperatureUuid, :descriptors => [cccd] }
             ];
             if (_model.details) {
-                characteristics.add({ :uuid => _remainingUuid, :descriptors => [cccd] });
-                characteristics.add({ :uuid => _insideUuid });
-                characteristics.add({ :uuid => _regulationUuid });
-                characteristics.add({ :uuid => _goalUuid });
+                // A characteristic that is not named here cannot be read later, so
+                // the ones for the diagnostics page are named as well.
+                for (var i = 0; i < _detailCodes.size(); i++) {
+                    if (_notifyCodes.indexOf(_detailCodes[i]) >= 0) {
+                        characteristics.add({ :uuid => Protocol.uuid(_detailCodes[i]), :descriptors => [cccd] });
+                    } else {
+                        characteristics.add({ :uuid => Protocol.uuid(_detailCodes[i]) });
+                    }
+                }
+                for (var i = 0; i < _diagnosticCodes.size(); i++) {
+                    characteristics.add({ :uuid => Protocol.uuid(_diagnosticCodes[i]) });
+                }
             }
+            trace("profile of " + characteristics.size() + " characteristics");
             BluetoothLowEnergy.registerProfile({ :uuid => _serviceUuid, :characteristics => characteristics });
         } catch (e) {
             trace("profile error");
@@ -169,12 +191,12 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
         var sent = false;
         for (var i = 0; i < _links.size(); i++) {
             var link = _links[i];
-            if (link.goal == null) {
+            if (link.others.get(Protocol.CODE_TARGET) == null) {
                 continue;
             }
             link.pendingTarget = degrees;
-            if (!queued(link, :writeTarget)) {
-                _ops.add(new Op(link, :writeTarget));
+            if (!queued(link, :writeTarget, 0)) {
+                _ops.add(new Op(link, :writeTarget, 0));
             }
             sent = true;
         }
@@ -191,12 +213,12 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
         var sent = false;
         for (var i = 0; i < _links.size(); i++) {
             var link = _links[i];
-            if (link.regulation == null) {
+            if (link.others.get(Protocol.CODE_REGULATION) == null) {
                 continue;
             }
             link.pendingRegulation = on;
-            if (!queued(link, :writeRegulation)) {
-                _ops.add(new Op(link, :writeRegulation));
+            if (!queued(link, :writeRegulation, 0)) {
+                _ops.add(new Op(link, :writeRegulation, 0));
             }
             sent = true;
         }
@@ -218,8 +240,8 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
                 continue;
             }
             link.pendingLevel = level;
-            if (!queued(link, :write)) {
-                _ops.add(new Op(link, :write));
+            if (!queued(link, :write, 0)) {
+                _ops.add(new Op(link, :write, 0));
             }
             sent = true;
         }
@@ -229,6 +251,14 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
             return;
         }
         _model.changed();
+        run();
+    }
+
+    // Reads what the diagnostics page shows from every connected pack. Reads only.
+    public function readDiagnostics() as Void {
+        for (var i = 0; i < _links.size(); i++) {
+            readOthers(_links[i], _diagnosticCodes);
+        }
         run();
     }
 
@@ -317,14 +347,8 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
                     pack.battery = value[0];
                 } else if (op.kind == :readTemperature) {
                     pack.temperature = Protocol.temperature(value[0]);
-                } else if (op.kind == :readRemaining) {
-                    pack.remaining = Protocol.word(value);
-                } else if (op.kind == :readInside) {
-                    pack.inside = Protocol.degrees(value[0]);
-                } else if (op.kind == :readRegulation) {
-                    pack.regulating = (value[0] == 1);
-                } else if (op.kind == :readTarget) {
-                    pack.goal = Protocol.degrees(value[0]);
+                } else if (op.kind == :readOther) {
+                    store(pack, op.code, value);
                 }
             } else if (op.kind == :readHeat || op.kind == :readBattery) {
                 // Level and battery are what a pack is used for. Everything else is an
@@ -405,10 +429,22 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
                     link.pack.temperature = degrees;
                     _model.changed();
                 }
-            } else if (characteristic.equals(link.remaining)) {
-                // Changes every minute while a pack heats, so it gets no line in the log.
-                link.pack.remaining = Protocol.word(value);
-                _model.changed();
+            } else {
+                // The extras that notify change while a pack heats, some of them every
+                // minute, so they get no line in the log. What does get one is a pack
+                // starting or ceasing to say that something is wrong.
+                for (var k = 0; k < _notifyCodes.size(); k++) {
+                    var other = link.others.get(_notifyCodes[k]);
+                    if (other != null && characteristic.equals(other)) {
+                        var before = link.pack.trouble();
+                        store(link.pack, _notifyCodes[k], value);
+                        var after = link.pack.trouble();
+                        if (!after.equals(before)) {
+                            trace("pack notified trouble: '" + after + "'");
+                        }
+                        _model.changed();
+                    }
+                }
             }
         }
     }
@@ -442,12 +478,10 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
         sweep();
         if (_model.details) {
             _checks++;
-            if (_checks >= INSIDE_EVERY_CHECKS) {
+            if (_checks >= POLL_EVERY_CHECKS) {
                 _checks = 0;
                 for (var i = 0; i < _links.size(); i++) {
-                    if (_links[i].inside != null && !queued(_links[i], :readInside)) {
-                        _ops.add(new Op(_links[i], :readInside));
-                    }
+                    readOthers(_links[i], _pollCodes);
                 }
             }
         }
@@ -476,23 +510,71 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
         }
         trace("pack " + _links.size() + " accepted, reading");
         _model.note = "";
-        _ops.add(new Op(link, :readHeat));
-        _ops.add(new Op(link, :readBattery));
-        _ops.add(new Op(link, :readTemperature));
-        _ops.add(new Op(link, :subHeat));
-        _ops.add(new Op(link, :subBattery));
-        _ops.add(new Op(link, :subTemperature));
+        _ops.add(new Op(link, :readHeat, 0));
+        _ops.add(new Op(link, :readBattery, 0));
+        _ops.add(new Op(link, :readTemperature, 0));
+        _ops.add(new Op(link, :subHeat, 0));
+        _ops.add(new Op(link, :subBattery, 0));
+        _ops.add(new Op(link, :subTemperature, 0));
         if (_model.details) {
             // After the rest, so that level and battery are on the screen first.
-            link.remaining = service.getCharacteristic(_remainingUuid);
-            link.inside = service.getCharacteristic(_insideUuid);
-            link.regulation = service.getCharacteristic(_regulationUuid);
-            link.goal = service.getCharacteristic(_goalUuid);
-            _ops.add(new Op(link, :readRemaining));
-            _ops.add(new Op(link, :readInside));
-            _ops.add(new Op(link, :readRegulation));
-            _ops.add(new Op(link, :readTarget));
-            _ops.add(new Op(link, :subRemaining));
+            look(link, service, _detailCodes);
+            look(link, service, _diagnosticCodes);
+            readOthers(link, _detailCodes);
+            for (var i = 0; i < _notifyCodes.size(); i++) {
+                if (link.others.get(_notifyCodes[i]) != null) {
+                    _ops.add(new Op(link, :subOther, _notifyCodes[i]));
+                }
+            }
+        }
+    }
+
+    // Finds the characteristics with these codes in a pack's service.
+    private function look(link as Link, service as Service, codes as Array<Number>) as Void {
+        for (var i = 0; i < codes.size(); i++) {
+            var characteristic = service.getCharacteristic(Protocol.uuid(codes[i]));
+            if (characteristic != null) {
+                link.others.put(codes[i], characteristic);
+            }
+        }
+    }
+
+    // Queues a read of each of these extras that the pack has and that is not waiting
+    // to be read already.
+    private function readOthers(link as Link, codes as Array<Number>) as Void {
+        for (var i = 0; i < codes.size(); i++) {
+            if (link.others.get(codes[i]) != null && !queued(link, :readOther, codes[i])) {
+                _ops.add(new Op(link, :readOther, codes[i]));
+            }
+        }
+    }
+
+    // Puts the value of an extra where the pages look for it.
+    private function store(pack as Pack, code as Number, value as ByteArray) as Void {
+        if (code == Protocol.CODE_REMAINING) {
+            pack.remaining = Protocol.word(value);
+        } else if (code == Protocol.CODE_INSIDE) {
+            pack.inside = Protocol.degrees(value[0]);
+        } else if (code == Protocol.CODE_REGULATION) {
+            pack.regulating = (value[0] == 1);
+        } else if (code == Protocol.CODE_TARGET) {
+            pack.goal = Protocol.degrees(value[0]);
+        } else if (code == Protocol.CODE_RESISTANCE) {
+            pack.resistance = Protocol.word(value);
+        } else if (code == Protocol.CODE_ALLOWED) {
+            pack.allowed = (value[0] == 1);
+        } else if (code == Protocol.CODE_CAPACITY) {
+            pack.capacity = Protocol.word(value);
+        } else if (code == Protocol.CODE_CURRENT) {
+            pack.current = Protocol.word(value);
+        } else if (code == Protocol.CODE_DESIGN) {
+            pack.design = Protocol.word(value);
+        } else if (code == Protocol.CODE_GAUGE) {
+            pack.gauge = Protocol.degrees(value[0]);
+        } else if (code == Protocol.CODE_COLDEST) {
+            pack.coldest = Protocol.degrees(value[0]);
+        } else if (code == Protocol.CODE_COLDEST_BEFORE) {
+            pack.coldestBefore = Protocol.degrees(value[0]);
         }
     }
 
@@ -567,17 +649,8 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
             if (op.kind == :readTemperature) {
                 return read(link.temperature);
             }
-            if (op.kind == :readRemaining) {
-                return read(link.remaining);
-            }
-            if (op.kind == :readInside) {
-                return read(link.inside);
-            }
-            if (op.kind == :readRegulation) {
-                return read(link.regulation);
-            }
-            if (op.kind == :readTarget) {
-                return read(link.goal);
+            if (op.kind == :readOther) {
+                return read(link.others.get(op.code));
             }
             if (op.kind == :subHeat) {
                 return subscribe(link.heat);
@@ -588,28 +661,30 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
             if (op.kind == :subTemperature) {
                 return subscribe(link.temperature);
             }
-            if (op.kind == :subRemaining) {
-                return subscribe(link.remaining);
-            }
-            if (op.kind == :writeTarget && link.goal != null && link.pendingTarget != null) {
-                _sentTarget = link.pendingTarget as Number;
-                link.pendingTarget = null;
-                (link.goal as Characteristic).requestWrite(
-                    [_sentTarget + Protocol.TEMPERATURE_OFFSET]b, {:writeType => BluetoothLowEnergy.WRITE_TYPE_WITH_RESPONSE});
-                return true;
-            }
-            if (op.kind == :writeRegulation && link.regulation != null && link.pendingRegulation != null) {
-                _sentRegulation = link.pendingRegulation as Boolean;
-                link.pendingRegulation = null;
-                (link.regulation as Characteristic).requestWrite(
-                    [_sentRegulation ? 1 : 0]b, {:writeType => BluetoothLowEnergy.WRITE_TYPE_WITH_RESPONSE});
-                return true;
+            if (op.kind == :subOther) {
+                return subscribe(link.others.get(op.code));
             }
             if (op.kind == :write && link.heat != null && link.pendingLevel != null) {
                 _sentLevel = link.pendingLevel as Number;
                 link.pendingLevel = null;
                 (link.heat as Characteristic).requestWrite(
                     [_sentLevel]b, {:writeType => BluetoothLowEnergy.WRITE_TYPE_WITH_RESPONSE});
+                return true;
+            }
+            var goal = link.others.get(Protocol.CODE_TARGET);
+            if (op.kind == :writeTarget && goal != null && link.pendingTarget != null) {
+                _sentTarget = link.pendingTarget as Number;
+                link.pendingTarget = null;
+                goal.requestWrite(
+                    [_sentTarget + Protocol.TEMPERATURE_OFFSET]b, {:writeType => BluetoothLowEnergy.WRITE_TYPE_WITH_RESPONSE});
+                return true;
+            }
+            var regulation = link.others.get(Protocol.CODE_REGULATION);
+            if (op.kind == :writeRegulation && regulation != null && link.pendingRegulation != null) {
+                _sentRegulation = link.pendingRegulation as Boolean;
+                link.pendingRegulation = null;
+                regulation.requestWrite(
+                    [_sentRegulation ? 1 : 0]b, {:writeType => BluetoothLowEnergy.WRITE_TYPE_WITH_RESPONSE});
                 return true;
             }
         } catch (e) {
@@ -687,9 +762,9 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
         BluetoothLowEnergy.setScanState(on ? BluetoothLowEnergy.SCAN_STATE_SCANNING : BluetoothLowEnergy.SCAN_STATE_OFF);
     }
 
-    private function queued(link as Link, kind as Symbol) as Boolean {
+    private function queued(link as Link, kind as Symbol, code as Number) as Boolean {
         for (var i = 0; i < _ops.size(); i++) {
-            if (_ops[i].link == link && _ops[i].kind == kind) {
+            if (_ops[i].link == link && _ops[i].kind == kind && _ops[i].code == code) {
                 return true;
             }
         }

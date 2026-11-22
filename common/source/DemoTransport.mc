@@ -17,6 +17,9 @@ class DemoTransport {
     private const SECOND_PACK_TICK = 3;
     // Second at which the first pack changes level by itself.
     private const BUTTON_TICK = 12;
+    // Seconds at which the second pack runs low and then drops out, for the alerts.
+    private const LOW_TICK = 25;
+    private const LOST_TICK = 40;
 
     private var _model as Model;
     private var _running as Boolean = false;
@@ -56,6 +59,19 @@ class DemoTransport {
         _model.changed();
     }
 
+    public function readDiagnostics() as Void {
+        for (var i = 0; i < _model.packs.size(); i++) {
+            var pack = _model.packs[i];
+            pack.capacity = 2480 + 30 * i;
+            pack.current = 312 - 14 * i;
+            pack.design = 2600;
+            pack.gauge = 24 - i;
+            pack.coldest = 12 - i;
+            pack.coldestBefore = 8 + i;
+        }
+        _model.changed();
+    }
+
     public function onTick() as Void {
         if (!_running) {
             return;
@@ -74,6 +90,11 @@ class DemoTransport {
             for (var i = 0; i < _model.packs.size(); i++) {
                 _model.packs[i].temperature = 31 - 4 * i;
             }
+        }
+        if (_ticks == LOW_TICK && _model.packs.size() > 1) {
+            _model.packs[1].battery = 9;
+        } else if (_ticks == LOST_TICK && _model.packs.size() > 1) {
+            _model.packs = [_model.packs[0]] as Array<Pack>;
         }
         if (_apply && _model.target != null) {
             _apply = false;
@@ -101,6 +122,8 @@ class DemoTransport {
             pack.inside = inside;
             pack.regulating = false;
             pack.goal = Protocol.TARGET_DEFAULT;
+            pack.resistance = 845 - 7 * _model.packs.size();
+            pack.allowed = true;
         }
         _model.packs.add(pack);
     }

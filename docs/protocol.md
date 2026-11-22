@@ -120,6 +120,18 @@ something the phone does, and the pack only ever receives a heat level.
 
 While a mode other than manual runs, the app shows a notification that it is running.
 
+Two more things the app does with what a pack reports, both read from its code:
+
+- It tells the user to recharge once a battery is at 10 percent or below, and tells them
+  when a pack has disconnected.
+- It treats a heater resistance (`0004`) of 65535 as a special case on the product's
+  page. That value probably stands for no heating element attached to the pack; what
+  the app shows for it was not worked out.
+
+Of the other values only the battery level, the charge state and the remaining heat
+time reach the user. Resistance, consumption, the capacities and the inner temperatures
+are shown on a debug page only.
+
 External temperature: the app takes a reading as present only from -20 to 214 degrees
 Celsius. Outside that range it acts as if the product had no sensor; a raw `FF` gives
 215 and falls outside. It shows one temperature for each pack, not a combined one. This
@@ -161,6 +173,15 @@ The widget alone also uses these, and like the temperature each is optional:
 - `0015` and `0016`: read when a pack connects. The widget writes the target within the
   phone app's 15 to 35 degrees, and writes the switch, each after a button press and
   each on its own.
+- `0004` HEATER_RESISTANCE: read and notifications. Only 65535 is acted on: the widget
+  marks that pack as having no heater attached, with a question mark.
+- `000F` HEATING_ALLOWED: read when a pack connects and again every half a minute. The
+  widget marks a pack that says no.
+- `0006`, `0007`, `0017`, `0018`, `0019` and `001A`: read when the diagnostics page
+  opens and shown as they come.
+
+The data field uses nothing beyond the first three. Its alerts come from the battery
+level, at the phone app's 10 percent, and from a pack going away.
 
 ## Unknown
 

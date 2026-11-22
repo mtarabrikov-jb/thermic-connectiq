@@ -47,10 +47,11 @@ module Screen {
         }
         dc.setPenWidth(1);
 
-        drawTitle(dc, cx, cy, control ? "SET LEVEL" : "THERM-IC");
-        drawLevel(dc, cx, cy - 14, shown, Graphics.FONT_NUMBER_HOT, Graphics.FONT_LARGE);
-
         var count = model.packs.size();
+        drawTitle(dc, cx, cy, control ? "SET LEVEL" : "THERM-IC");
+        drawLevel(dc, cx, cy - 14, shown, Graphics.FONT_NUMBER_HOT, Graphics.FONT_LARGE,
+            !control && count == 1 && model.packs[0].trouble().length() > 0);
+
         var warm = anyTemperature(model);
         var bottom = cy + 54;
         if (count == 0) {
@@ -76,8 +77,9 @@ module Screen {
             dc.drawText(cx + 52, cy + (warm ? 46 : 32), Graphics.FONT_XTINY, "+", Graphics.TEXT_JUSTIFY_CENTER);
         }
         drawHint(dc, model, control ? "UP/DN  START on/off" : "START to set", cx, bottom + 2);
-        if (control && warm && model.note.length() == 0) {
-            dc.drawText(cx, bottom + 20, Graphics.FONT_XTINY, "MENU: temp", Graphics.TEXT_JUSTIFY_CENTER);
+        if (control && count > 0 && model.note.length() == 0) {
+            dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
+            dc.drawText(cx, bottom + 20, Graphics.FONT_XTINY, "MENU: more", Graphics.TEXT_JUSTIFY_CENTER);
         }
     }
 
@@ -112,7 +114,8 @@ module Screen {
             var x = cx + ((i == 0) ? -COLUMN : COLUMN);
             dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
             Icons.foot(dc, x, cy - 92, i == 0);
-            drawLevel(dc, x, cy - 30, pack.level, Graphics.FONT_NUMBER_MEDIUM, Graphics.FONT_MEDIUM);
+            drawLevel(dc, x, cy - 30, pack.level, Graphics.FONT_NUMBER_MEDIUM, Graphics.FONT_MEDIUM,
+                pack.trouble().length() > 0);
             var end = drawPack(dc, x, cy + (warm ? -6 : 0), pack, warm, true);
             if (end > bottom) {
                 bottom = end;
@@ -203,9 +206,10 @@ module Screen {
     }
 
     // A level with a thermometer in front of it: a big number, "OFF" for zero and "--"
-    // while it is not known. x and y are the middle of the two together.
+    // while it is not known. A warning sign takes the thermometer's place when the pack
+    // says something is wrong. x and y are the middle of the two together.
     function drawLevel(dc as Dc, x as Number, y as Number, level as Number?,
-            numberFont as Graphics.FontType, textFont as Graphics.FontType) as Void {
+            numberFont as Graphics.FontType, textFont as Graphics.FontType, troubled as Boolean) as Void {
         var text = "--";
         var font = textFont;
         if (level != null) {
@@ -218,8 +222,12 @@ module Screen {
         }
         var width = dc.getTextWidthInPixels(text, font);
         var start = x - (16 + width) / 2;
-        dc.setColor(Graphics.COLOR_ORANGE, Graphics.COLOR_TRANSPARENT);
-        Icons.thermometer(dc, start + 3, y - Icons.THERMOMETER_HEIGHT / 2);
+        if (troubled) {
+            Icons.warning(dc, start + 4, y - 8);
+        } else {
+            dc.setColor(Graphics.COLOR_ORANGE, Graphics.COLOR_TRANSPARENT);
+            Icons.thermometer(dc, start + 3, y - Icons.THERMOMETER_HEIGHT / 2);
+        }
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
         dc.drawText(start + 16 + width / 2, y, font, text, Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
     }
@@ -272,17 +280,84 @@ module Screen {
         dc.drawText(start + Icons.CLOCK_SIZE + 4, y, font, text, Graphics.TEXT_JUSTIFY_LEFT);
     }
 
-    // Bottom line: what the buttons do, or in red what went wrong. Leaves the colour
-    // set for a line that may follow.
+    // Bottom line: what the buttons do; in red what went wrong with the link; in yellow
+    // what a pack says is wrong with itself.
     function drawHint(dc as Dc, model as Model, hint as String, cx as Number, y as Number) as Void {
+        var trouble = "";
+        for (var i = 0; i < model.packs.size() && trouble.length() == 0; i++) {
+            trouble = model.packs[i].trouble();
+        }
         dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
         if (model.note.length() > 0) {
             hint = model.note;
             dc.setColor(Graphics.COLOR_RED, Graphics.COLOR_TRANSPARENT);
+        } else if (trouble.length() > 0) {
+            hint = trouble;
+            dc.setColor(Graphics.COLOR_YELLOW, Graphics.COLOR_TRANSPARENT);
         } else if (model.packs.size() == 0 && !hint.equals("START to set")) {
             hint = "no pack connected";
         }
         dc.drawText(cx, y, Graphics.FONT_XTINY, hint, Graphics.TEXT_JUSTIFY_CENTER);
+    }
+
+    // The diagnostics page: a line for each value and a column for each pack. Where the
+    // unit is not known the number is shown as the pack gives it.
+    function drawDiagnostics(dc as Dc, model as Model) as Void {
+        var cx = dc.getWidth() / 2;
+        var cy = dc.getHeight() / 2;
+        var font = Graphics.FONT_XTINY;
+        var count = model.packs.size();
+
+        dc.setColor(Graphics.COLOR_BLACK, Graphics.COLOR_BLACK);
+        dc.clear();
+        dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(cx, cy - 98, font, "DIAGNOSTICS", Graphics.TEXT_JUSTIFY_CENTER);
+        if (count == 0) {
+            dc.drawText(cx, cy - 12, Graphics.FONT_TINY, "no pack connected", Graphics.TEXT_JUSTIFY_CENTER);
+            return;
+        }
+
+        var labels = ["current", "capacity", "design", "heater", "gauge", "coldest", "before"] as Array<String>;
+        var y = cy - 74;
+        for (var row = 0; row < labels.size(); row++) {
+            dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
+            dc.drawText(cx - 86, y, font, labels[row], Graphics.TEXT_JUSTIFY_LEFT);
+            dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
+            for (var i = 0; i < count; i++) {
+                var x = (count == 1) ? cx + 70 : cx + 34 + 50 * i;
+                dc.drawText(x, y, font, diagnostic(model.packs[i], row), Graphics.TEXT_JUSTIFY_RIGHT);
+            }
+            y += 19;
+        }
+        dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(cx, y + 3, font, "START: read again", Graphics.TEXT_JUSTIFY_CENTER);
+    }
+
+    // The value for one line of the diagnostics page, "--" until it has been read.
+    function diagnostic(pack as Pack, row as Number) as String {
+        var value = null as Number?;
+        if (row == 0) {
+            value = pack.current;
+        } else if (row == 1) {
+            value = pack.capacity;
+        } else if (row == 2) {
+            value = pack.design;
+        } else if (row == 3) {
+            value = pack.resistance;
+            if (value == Protocol.RESISTANCE_OPEN) {
+                return "open";
+            }
+        } else if (row == 4) {
+            value = pack.gauge;
+        } else if (row == 5) {
+            value = pack.coldest;
+        } else {
+            value = pack.coldestBefore;
+        }
+        if (value == null) {
+            return "--";
+        }
+        return (row >= 4) ? Units.temperature(value) : value.toString();
     }
 
     // "24°   26°", one per pack, with "--" for a pack that has no reading.

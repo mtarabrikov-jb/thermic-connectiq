@@ -125,9 +125,9 @@ Update this section whenever it stops being true.
   the demo builds, the field in all ten layouts. On the watch only the one-pack pages
   have been seen: there is one emulator, and two real packs have never been connected
   at once.
-- Details in the widget, added last: remaining heat time (`0010`), the temperature
-  inside the pack (`0012`, read again every half a minute) and target temperature
-  regulation (`0015`, `0016`) with a page of its own, opened with MENU from the level
+- Details in the widget: remaining heat time (`0010`), the temperature inside the pack
+  (`0012`, read again every half a minute) and target temperature regulation (`0015`,
+  `0016`) with a page of its own, reached through the menu behind MENU on the level
   page. The widget asks for them with `Model.details`; the data field does not, and
   connects with the same three characteristics as before. On the watch against the
   emulator, with one pack: the profile of seven characteristics registered, the four
@@ -137,6 +137,48 @@ Update this section whenever it stops being true.
   The pages themselves are checked in the simulator. Unknown until real gear: whether
   a pack regulates on its own once told to, and what its heat level means while it
   does.
+- Warnings and diagnostics in the widget: a warning sign when a pack reports a heater
+  resistance of 65535 (`0004`) or says it may not heat (`000F`), and a diagnostics page
+  that reads six more values when it opens. For this the transport's extras were
+  reworked: they are kept by code and go through one read, one subscription and one
+  decoder. On the watch against the emulator, one run with one pack, after the rework:
+  the profile of 15 characteristics registered, `000F` was read every 30 s and followed
+  the emulator both ways, 65535 was read when the pack connected, the diagnostics page
+  read its six values on opening and on each START, and level, target and switch were
+  written as before. In a second run the notifications of `0004` arrived as well: the
+  log has `pack notified trouble: 'no heater?'` and, 17 s later, the same with nothing
+  between the quotes. What 65535 means is a guess: on real gear, unplug the heater and
+  look.
+- Alerts in the data field, when a pack's battery is at 10 percent or below and when a
+  pack is lost. Each goes three ways: a pop-up, a vibration, and the field's own cell in
+  inverted colours for ten seconds, because the simulator cannot show the pop-up for
+  this watch. The first wording, `LOW 9%` over `battery`, the owner could not place: on
+  a watch that reads as the watch's own battery. The words now name the heater and
+  stand above the value like a field's label: `Heater battery low` over `9%`. On the
+  watch against the emulator, one run with one pack and that wording: both alerts were
+  raised, each a second after its cause, and the owner saw the pop-up, felt the
+  vibration and found the cell still inverted once the pop-up had gone. With two packs
+  the alerts are checked in the simulator only.
+- Reconnecting after a lost link, seen in that run: 75 s from the loss to the values
+  being back, twice the usual time. The watch connects again on its own, the transport
+  has no attempt of its own pending, lets that link go, and then scans and connects
+  anew. Open: take over a link the watch brings back by itself.
+- The data field's label, `THERM-IC`, asked for by the owner: above the values in a
+  tall cell, sharing a line with the batteries in a low one, left out only where it
+  would make the values smaller than they are without it. **Checked in the simulator
+  only**, in all ten layouts with two packs, one and none. With two packs it is missing
+  in one kind of cell: the lowest one at the bottom of the screen, in the layouts with
+  four (A), five and six fields.
+- The widget in the watch's list of widgets: the build with the details ran out of
+  memory there twice on the watch, see "Things that cost time". Fixed with a glance
+  view and a `Session` made on opening. In the simulator the glance uses 6 KB of 28 KB,
+  and the same build without the annotation crashes there. On the watch, one run: the
+  list started the app as a glance, no Bluetooth line followed until the widget was
+  opened, and the crash log got no new entry.
+- Open, small: on the level page a press made between a write and the pack's
+  notification of it is lost. The notification sets the level back to the written
+  value, and the next press starts from there. Seen in the watch's log as the same
+  target twice in a row.
 - Open: which pack is on which foot. Nothing in a pack says so, and Connect IQ gives no
   device address, so the first pack to connect is shown on the left and the sides can
   swap between sessions. With real packs, look for something stable in the advertising
@@ -205,6 +247,15 @@ Connect IQ:
   manifest lists only the first. The real build idles at 17 KB in the simulator.
 - The simulator's menus and dialogs are separate windows. `shot:` does not see them;
   `screen:` does, and `tap:` clicks at the coordinates read off such a screenshot.
+- For this watch the simulator cannot show a data field's alert: Data Fields > Enable
+  Alert stays grey, and `showAlert()` returns without showing anything. To see what
+  the pop-up draws, copy `datafield/` and `common/` to a scratch directory, make the
+  copy's `HeatField.onUpdate()` call `new $.PackAlert(...).onUpdate(dc)` while an alert
+  is on, and run its demo build in the layout with one field.
+- BlueZ keeps a link when the application that served it unregisters. Until the
+  emulator learned to disconnect, stopping it left the watch connected to nothing, with
+  no "disconnected" in its log, and a test of "the pack is gone" tested nothing. `quit`
+  and the `drop` command cut the link now, and the emulator's log says `LINK dropped`.
 - The simulator stops the app while one of its menus is open. Count a `wait:` from the
   moment the menu closes, or the shot shows an earlier state than its name says.
 - The simulator starts with statute units, so temperatures come out in Fahrenheit.
@@ -217,6 +268,22 @@ Connect IQ:
   `onPreviousPage`) but no raw key events.
 - A long press of UP reaches a pushed page as `onMenu()`. In the simulator the key for
   it is `m`.
+- This watch starts a widget twice: for its list of widgets in glance mode, with 32 KB,
+  and again in full when the widget is opened. Without a `(:glance)` annotation the
+  whole app is loaded into those 32 KB, and `onStart()` runs there too. Both went
+  unnoticed for a day: the widget fitted, and its `onStart()` scanned for packs every
+  time the list showed it. Once the widget grew past the limit the list failed with
+  "Out Of Memory Error: Failed loading application" while the opened widget still
+  worked. So the app class and the glance view carry `(:glance)`, `onStart()` starts
+  nothing, and what an opened widget needs is made in `getInitialView()`. The compiler
+  warns about a missing annotation only once the app has a glance view. `probe/` has
+  none of this and may fail in the list the same way.
+- The crash log on the watch is `GARMIN/Apps/LOGS/CIQ_LOG.YML`, not `.YAML`. Asking for
+  the wrong name looks exactly like "no crashes". List the directory.
+- The simulator starts a widget that has a glance view as a glance, and keys reach it
+  late there. Settings > Glance Launch Mode > Launch in Normal Mode opens it in full:
+  `click:73,12 wait:1 tap:141,534 wait:1 key:Right key:Return wait:3`. Changing any
+  other setting restarts the app as a glance again, so this step comes last.
 - The simulator swallows the first key press after an app loads.
   `tools/simulator/simshot.sh` spends a Shift on it.
 - The display has 64 colours. Icons need palette colours and hard edges, or the compiler

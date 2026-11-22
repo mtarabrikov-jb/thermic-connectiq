@@ -18,6 +18,37 @@ class Pack {
     // Celsius. Both are settings kept in the pack.
     public var regulating as Boolean? = null;
     public var goal as Number? = null;
+    // Heater resistance as the pack gives it, unit unknown. Protocol.RESISTANCE_OPEN
+    // is taken to mean that no heating element is attached.
+    public var resistance as Number? = null;
+    // Whether the pack lets itself heat.
+    public var allowed as Boolean? = null;
+
+    // Read only when Transport.readDiagnostics() asks. Numbers as the pack gives them
+    // where the unit is not known, degrees Celsius for the three temperatures.
+    public var capacity as Number? = null;
+    public var current as Number? = null;
+    public var design as Number? = null;
+    public var gauge as Number? = null;
+    public var coldest as Number? = null;
+    public var coldestBefore as Number? = null;
+
+    // Set by an app once it has warned about this pack's battery, so that it warns
+    // once and not every second.
+    public var warned as Boolean = false;
+
+    // What is wrong with this pack as far as it tells, in a few words, or "" when
+    // nothing is.
+    public function trouble() as String {
+        if (resistance == Protocol.RESISTANCE_OPEN) {
+            // With a question mark: what that resistance means is a guess.
+            return "no heater?";
+        }
+        if (allowed == false) {
+            return "heat blocked";
+        }
+        return "";
+    }
 }
 
 // Anything that can find packs and set their level. The views only use this
@@ -34,6 +65,9 @@ typedef Transport as interface {
     function setLevel(level as Number) as Void;
     function setTarget(degrees as Number) as Void;
     function setRegulation(on as Boolean) as Void;
+    // Reads the values of the diagnostics page from every connected pack. Nothing is
+    // written. Only with Model.details.
+    function readDiagnostics() as Void;
 };
 
 // State shared by the transport and the views.
@@ -43,8 +77,9 @@ class Model {
 
     public var packs as Array<Pack> = [] as Array<Pack>;
     // Set by an app before the transport starts when it also shows remaining heat time,
-    // the temperature inside the pack and the target temperature. Reading them makes
-    // connecting take longer, so an app that does not show them leaves this off.
+    // the temperature inside the pack, the target temperature, what is wrong with a
+    // pack and its diagnostics. Reading them makes connecting take longer, so an app
+    // that does not show them leaves this off.
     public var details as Boolean = false;
     public var searching as Boolean = false;
     // A pack was found and the connection is being set up. This takes a while:

@@ -9,6 +9,8 @@ import Toybox.Lang;
 //   0001  service
 //   0002  heat level, 1 byte, 0..10, read / write / notify
 //   0005  battery level, 1 byte, percent, read / notify
+//   0004  heater resistance, 2 bytes, unit unknown, read / notify
+//   000F  heating allowed, 1 byte, 1 yes / 0 no, read
 //   0010  remaining heat time, 2 bytes, minutes, read / notify
 //   0012  internal temperature, 1 byte, value - 40 = degrees Celsius, read
 //   0013  external temperature, 1 byte, value - 40 = degrees Celsius, read / notify
@@ -41,10 +43,30 @@ module Protocol {
     const TEMPERATURE_MAX = 214;
 
     // What only the widget reads.
+    const CODE_RESISTANCE = 0x0004;
+    const CODE_ALLOWED = 0x000F;
     const CODE_REMAINING = 0x0010;
     const CODE_INSIDE = 0x0012;
     const CODE_REGULATION = 0x0015;
     const CODE_TARGET = 0x0016;
+
+    // What the widget reads only for its diagnostics page: battery capacity and
+    // current consumption in units that are not known, the temperature of the fuel
+    // gauge chip, the capacity the battery was designed for, and the lowest temperature
+    // inside the pack, now and before.
+    const CODE_CAPACITY = 0x0006;
+    const CODE_CURRENT = 0x0007;
+    const CODE_GAUGE = 0x0017;
+    const CODE_DESIGN = 0x0018;
+    const CODE_COLDEST = 0x0019;
+    const CODE_COLDEST_BEFORE = 0x001A;
+
+    // The phone app sets a heater resistance of 65535 apart from all others. It is
+    // taken to mean that no heating element is attached to the pack; that is a guess.
+    const RESISTANCE_OPEN = 0xFFFF;
+
+    // The phone app tells the user to recharge at this battery level and below.
+    const LOW_BATTERY = 10;
 
     // The phone app lets the target temperature be set from 15 to 35 degrees and starts
     // a new product at 25.
