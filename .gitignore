@@ -1,0 +1,20 @@
+# Build output of the Connect IQ compiler
+bin/
+*.prg
+*.iq
+
+# Signing keys never belong in the repository
+*.der
+*.pem
+developer_key*
+
+# Local branding and other files that must not be published (see README, "Branding")
+private/
+
+# Emulator session logs contain fragments of device addresses
+*.log
+
+__pycache__/
+*.pyc
+.vscode/
+.idea/

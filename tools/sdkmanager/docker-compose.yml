@@ -1,0 +1,56 @@
+# Runs Garmin's Connect IQ SDK Manager in a container that still has WebKitGTK 4.0.
+# See Dockerfile for the reason. Start it with ./run.sh, which sets the variables below.
+#
+# The SDK and device files land in ~/.Garmin/ConnectIQ on the host. The container sees
+# the home directory under the same absolute path as the host, because the SDK Manager
+# writes absolute paths into its config files and the compiler on the host reads them.
+
+services:
+  sdkmanager:
+    build: .
+    image: ciq-sdkmanager:jammy
+    user: "${HOST_UID}:${HOST_GID}"
+    # The X authority cookie is looked up by host name, so it must match the host's.
+    hostname: "${HOST_NAME}"
+    environment:
+      HOME: "${HOME}"
+      DISPLAY: "${DISPLAY}"
+      XAUTHORITY: "${HOME}/.Xauthority"
+      # Uncomment together with the bus volume below if sign-in fails or the app
+      # complains about the password store. It gives the container access to the
+      # host session bus, keyring included.
+      # DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/${HOST_UID}/bus"
+    shm_size: 512m
+    volumes:
+      # Writable scratch home: WebKit keeps its cache and session data here. It is
+      # discarded on exit, so the app asks to sign in again on the next start.
+      - type: tmpfs
+        target: "${HOME}"
+        tmpfs:
+          size: 2147483648
+          mode: 0o1777
+      - type: bind
+        source: /tmp/.X11-unix
+        target: /tmp/.X11-unix
+        read_only: true
+      - type: bind
+        source: "${HOME}/.Xauthority"
+        target: "${HOME}/.Xauthority"
+        read_only: true
+      # create_host_path: false makes the run fail when ~/.Garmin is missing instead
+      # of letting the Docker daemon create it owned by root.
+      - type: bind
+        source: "${HOME}/.Garmin"
+        target: "${HOME}/.Garmin"
+        bind:
+          create_host_path: false
+      - type: bind
+        source: "${SDKMANAGER_DIR}"
+        target: "${SDKMANAGER_DIR}"
+        read_only: true
+        bind:
+          create_host_path: false
+      # - type: bind
+      #   source: "/run/user/${HOST_UID}/bus"
+      #   target: "/run/user/${HOST_UID}/bus"
+    command: ["${SDKMANAGER_DIR}/bin/sdkmanager"]

@@ -1,0 +1,8 @@
+# Real build: talks to the packs over Bluetooth LE.
+project.manifest = manifest.xml
+base.sourcePath = source;../common/source
+# The second resource path is optional and not in git. Resources there override the ones
+# with the same id from the first path; a missing directory is ignored. See "Branding"
+# in the README.
+base.resourcePath = resources;../private/widget/resources
+base.excludeAnnotations = demo

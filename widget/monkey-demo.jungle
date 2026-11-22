@@ -1,0 +1,6 @@
+# Demo build: two made-up packs instead of Bluetooth, for checking the screens
+# in the simulator or on the watch without any hardware.
+project.manifest = manifest.xml
+base.sourcePath = source;../common/source
+base.resourcePath = resources;../private/widget/resources
+base.excludeAnnotations = real
