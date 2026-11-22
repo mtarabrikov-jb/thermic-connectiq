@@ -101,6 +101,12 @@ there.
 The field only listens. A data field gets no button presses on a watch with buttons, so
 it cannot change the level and never writes to a pack.
 
+To spare the watch's battery the apps do not look for packs all the time. They search
+without a break for a minute after the start and after a pack comes or goes, then for 12
+seconds of every minute, and after ten more minutes for 12 seconds of every five. A pack
+switched on in the middle of an activity is therefore picked up within minutes, not at
+once.
+
 It is built for the fenix 6S Pro only: a data field has 128 KB there and 32 KB on the
 plain fenix 6S.
 
@@ -218,6 +224,12 @@ can carry its own icon. `tools/make_icon.py` produces one from a logo you supply
 
 Therm-ic and its logo are trademarks of their owner. Do not publish builds that use them
 without permission.
+
+## Licence
+
+MIT, see [LICENSE](LICENSE). It covers the code and the documents in this repository.
+It gives no rights to the names and logos of Therm-ic or Garmin, and it does not cover
+the picture of the watch in `docs/screens.png`, which comes from Garmin's simulator.
 
 ## How the protocol was worked out
 

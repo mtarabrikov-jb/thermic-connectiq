@@ -106,10 +106,13 @@ Update this section whenever it stops being true.
   the fallback is a relay: the watch talks to a companion Android app that holds the
   bond. Only `common/source/BleTransport.mc` would be replaced.
 - Two packs at once: implemented, never run.
-- Known gap: while no pack is connected the transport scans without end. In a widget
-  that lasts seconds, in a data field it can last a whole activity. What that costs the
-  watch battery is unmeasured. Add a duty cycle before the field is used for long
-  activities.
+- Search for packs, added last: without a break for the first minute after the start
+  and after a pack comes or goes, then in bursts; `common/source/Search.mc` has the
+  schedule. Its unit tests pass in the simulator. On the watch against the emulator,
+  one run of each: the continuous stretch found the pack 2 s after the emulator came
+  up, and with the emulator started three minutes after the field the next burst found
+  it within 3 s of beginning, 47 s after it appeared. What scanning costs the watch
+  battery is unmeasured, and so is how long a real pack takes to be found.
 - Temperature at the gear (characteristic `0013`): on the watch against the emulator
   both apps read it, followed its notifications and showed it, and the field recorded
   it as `gear_temperature`. Whether real gear reports a temperature is unknown: the
@@ -127,7 +130,8 @@ Update this section whenever it stops being true.
   data or in the device name.
 - Unknown: whether Garmin Connect shows recorded fields of an app that is not in the
   store. `tools/fitdump.py` shows what is in the file either way.
-- Open with the owner: licence, repository description.
+- Licence: MIT, chosen by the owner on 2026-11-22.
+- Open with the owner: repository description.
 
 ## Build and check
 
@@ -138,6 +142,8 @@ SDK="$(tr -d '\n' < ~/.Garmin/ConnectIQ/current-sdk.cfg)"
 "$SDK/bin/monkeyc" -d fenix6spro -f probe/monkey.jungle       -o probe/bin/TPROBE.prg    -y "$KEY" -w
 "$SDK/bin/monkeyc" -d fenix6spro -f datafield/monkey.jungle      -o datafield/bin/THERMICF.prg  -y "$KEY" -w
 "$SDK/bin/monkeyc" -d fenix6spro -f datafield/monkey-demo.jungle -o datafield/bin/THERMICFD.prg -y "$KEY" -w
+"$SDK/bin/monkeyc" -d fenix6spro -f widget/monkey-test.jungle    -o widget/bin/THERMICT.prg     -y "$KEY" -w -t
+tools/simulator/run.sh widget/bin/THERMICT.prg fenix6spro /tmp/tests tests wait:15
 ```
 
 `$KEY` is the developer key. It lives outside the repository; its path is in
@@ -150,6 +156,10 @@ SDK="$(tr -d '\n' < ~/.Garmin/ConnectIQ/current-sdk.cfg)"
   at the screenshots.
 - Recording change: record an activity in the simulator with the demo field, save the
   FIT file and read it with `tools/fitdump.py`. The README has the recipe.
+- The last two lines above build and run the unit tests; expect `PASSED` at the end of
+  the output. Logic that needs no watch, such as arithmetic on time, belongs in a
+  function without side effects with a test in `common/test/`. Waiting on a watch for
+  ten minutes to see whether a schedule is right is not a test.
 - Bluetooth change: the simulator has no Bluetooth, so this needs the watch and
   `emulator/pack_emulator.py`. Sideloading is done together with the owner. Compare the
   emulator's log with `GARMIN/Apps/LOGS/<NAME>.TXT` from the watch. Until that run

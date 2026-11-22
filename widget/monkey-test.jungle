@@ -1,0 +1,6 @@
+# Unit tests for the shared code. Build with monkeyc --unit-test and run in the
+# simulator with "tests" as the first step of tools/simulator/run.sh.
+project.manifest = manifest.xml
+base.sourcePath = source;../common/source;../common/test
+base.resourcePath = resources
+base.excludeAnnotations = real

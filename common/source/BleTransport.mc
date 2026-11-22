@@ -59,8 +59,6 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
     // its link came up. Keep a wide margin.
     private const CONNECT_TIMEOUT_MS = 90000;
     private const OP_TIMEOUT_MS = 10000;
-    // How long to keep looking for a second pack once one is connected.
-    private const SEARCH_MORE_MS = 45000;
 
     private var _model as Model;
     private var _serviceUuid as Uuid;
@@ -82,7 +80,12 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
     private var _ticks as Number = 0;
     private var _running as Boolean = false;
     private var _scanning as Boolean = false;
-    private var _searchUntil as Number = 0;
+    // For the search schedule: when the transport started or a pack last came or went,
+    // and the most packs connected at once so far.
+    private var _changedAt as Number = 0;
+    private var _mostPacks as Number = 0;
+    // What the log last said about the search; see updateScan().
+    private var _searchMode as Number = -2;
 
     public function initialize(model as Model) {
         BleDelegate.initialize();
@@ -112,7 +115,7 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
         }
         trace("start");
         _running = true;
-        _searchUntil = System.getTimer() + SEARCH_MORE_MS;
+        _changedAt = System.getTimer();
         updateScan();
     }
 
@@ -224,7 +227,7 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
             _pendingScan = null;
             _pendingDevice = null;
         }
-        _searchUntil = System.getTimer() + SEARCH_MORE_MS;
+        _changedAt = System.getTimer();
         updateScan();
         run();
     }
@@ -325,6 +328,8 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
             unpair(_pendingDevice as Device);
             _pendingScan = null;
             _pendingDevice = null;
+            // Try again without waiting for the next burst.
+            _changedAt = now;
             trace("connect timeout");
             _model.note = "connect timeout";
         }
@@ -355,6 +360,9 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
         link.temperature = service.getCharacteristic(_temperatureUuid);
         _links.add(link);
         _model.packs.add(pack);
+        if (_links.size() > _mostPacks) {
+            _mostPacks = _links.size();
+        }
         trace("pack " + _links.size() + " accepted, reading");
         _model.note = "";
         _ops.add(new Op(link, :readHeat));
@@ -382,6 +390,7 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
         }
         if (removed) {
             trace("pack lost, left " + links.size());
+            _changedAt = System.getTimer();
             _links = links;
             _model.packs = packs;
             if (!writesPending()) {
@@ -482,11 +491,33 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
         }
     }
 
+    // Turns the scan on or off as the schedule in Search.mc says, and tells the model
+    // whether packs are still being looked for.
     private function updateScan() as Void {
-        var more = _links.size() == 0 || System.getTimer() < _searchUntil;
-        var want = _running && _pendingScan == null && _links.size() < _model.MAX_PACKS && more;
-        setScan(want);
-        _model.searching = want || _pendingScan != null;
+        var since = System.getTimer() - _changedAt;
+        var packs = _links.size();
+        var missing = _running && packs < _model.MAX_PACKS;
+        var every = Search.period(since, packs, _mostPacks);
+        var scan = missing && _pendingScan == null && Search.scanning(since, packs, _mostPacks);
+        setScan(scan);
+
+        // One line in the log when the way of searching changes, not two for each
+        // burst: the log on the watch is small.
+        var mode = missing ? every : -1;
+        if (mode != _searchMode) {
+            _searchMode = mode;
+            if (mode < 0) {
+                trace("search: off");
+            } else if (mode == 0) {
+                trace("search: all the time");
+            } else {
+                trace("search: " + (Search.BURST_MS / 1000) + " s of every " + (mode / 1000) + " s");
+            }
+        }
+
+        // With no pack at all the search counts as going on between the bursts too, so
+        // that a page does not flicker between "searching" and "no pack".
+        _model.searching = _pendingScan != null || (missing && (every == 0 || scan || packs == 0));
         _model.connecting = _pendingScan != null;
         _model.changed();
     }
@@ -495,7 +526,6 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
         if (on == _scanning) {
             return;
         }
-        trace(on ? "scan on" : "scan off");
         _scanning = on;
         BluetoothLowEnergy.setScanState(on ? BluetoothLowEnergy.SCAN_STATE_SCANNING : BluetoothLowEnergy.SCAN_STATE_OFF);
     }

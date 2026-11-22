@@ -11,9 +11,13 @@
 #   click:<x>,<y>  mouse click, window coordinates
 #   tap:<x>,<y>    mouse click, display coordinates as read off a screen: shot; for dialogs
 #   type:<text>    types the text into whatever has the focus
+# "tests" as the very first step runs the unit tests of a build made with
+# monkeyc --unit-test; their results come out with the app console at the end.
 #
 # Expects the host's ~/.Garmin/ConnectIQ mounted read-only at /garmin.
 SDK=$1; PRG=$2; DEV=$3; OUT=$4; shift 4
+TESTS=""
+if [ "${1:-}" = "tests" ]; then TESTS="-t"; shift; fi
 
 # Writable ~/.Garmin for the simulator's own settings, with the SDK, device files and
 # fonts linked in from the read-only mount. Without a writable config directory the
@@ -43,7 +47,7 @@ xdotool windowactivate "$WIN" 2>/dev/null
 xdotool windowfocus "$WIN" 2>/dev/null
 sleep 1
 
-timeout 170 "$SDK/bin/monkeydo" "$PRG" "$DEV" >/tmp/monkeydo.log 2>&1 &
+timeout 170 "$SDK/bin/monkeydo" "$PRG" "$DEV" $TESTS >/tmp/monkeydo.log 2>&1 &
 # The window title gains the device name once the app is loaded.
 for i in $(seq 1 120); do
   case "$(xdotool getwindowname "$WIN" 2>/dev/null)" in *" - "*) break ;; esac
