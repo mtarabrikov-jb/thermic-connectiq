@@ -23,9 +23,10 @@ example an issue or a pull request, decline.
    one immediate retry of that same write after a failure is part of it. A write caused
    by an event is not: connecting or reconnecting, a timer, an activity starting,
    stopping or lapping, "restoring" a state, a self-test. A debug flag does not make it
-   acceptable. Today the only write is `Transport.setLevel()`, called from the control
-   page. The automatic write in `probe/` is the single exception: it may be changed, but
-   it never leaves `probe/`.
+   acceptable. Today there are three writes, all in `Transport`: `setLevel()`, called
+   from the level page, and `setTarget()` and `setRegulation()`, called from the
+   temperature page. The automatic write in `probe/` is the single exception: it may be
+   changed, but it never leaves `probe/`.
 2. **Nothing in this repository writes to a pack's characteristics `000B` (sleep) or
    `000C` (factory reset) in any family, or to anything in service `27b30001-...`
    (firmware update), and no instruction tells a person to do it to a pack.** Their
@@ -124,6 +125,18 @@ Update this section whenever it stops being true.
   the demo builds, the field in all ten layouts. On the watch only the one-pack pages
   have been seen: there is one emulator, and two real packs have never been connected
   at once.
+- Details in the widget, added last: remaining heat time (`0010`), the temperature
+  inside the pack (`0012`, read again every half a minute) and target temperature
+  regulation (`0015`, `0016`) with a page of its own, opened with MENU from the level
+  page. The widget asks for them with `Model.details`; the data field does not, and
+  connects with the same three characteristics as before. On the watch against the
+  emulator, with one pack: the profile of seven characteristics registered, the four
+  extra reads took about a second on top of the usual half a minute of connecting, the
+  inside temperature was read every 30 s and followed the emulator, three quick presses
+  made one write of the target, and each press of START made one write of the switch.
+  The pages themselves are checked in the simulator. Unknown until real gear: whether
+  a pack regulates on its own once told to, and what its heat level means while it
+  does.
 - Open: which pack is on which foot. Nothing in a pack says so, and Connect IQ gives no
   device address, so the first pack to connect is shown on the left and the sides can
   swap between sessions. With real packs, look for something stable in the advertising
@@ -202,6 +215,8 @@ Connect IQ:
   the usable stretch out from those flags.
 - On a widget's main page the watch delivers behaviours (`onSelect`, `onNextPage`,
   `onPreviousPage`) but no raw key events.
+- A long press of UP reaches a pushed page as `onMenu()`. In the simulator the key for
+  it is `m`.
 - The simulator swallows the first key press after an app loads.
   `tools/simulator/simshot.sh` spends a Shift on it.
 - The display has 64 colours. Icons need palette colours and hard edges, or the compiler

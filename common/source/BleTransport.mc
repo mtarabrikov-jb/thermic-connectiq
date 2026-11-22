@@ -11,8 +11,15 @@ class Link {
     public var heat as Characteristic? = null;
     public var battery as Characteristic? = null;
     public var temperature as Characteristic? = null;
-    // Level waiting to be written; null when nothing is pending.
+    // Only looked up when the model asks for details.
+    public var remaining as Characteristic? = null;
+    public var inside as Characteristic? = null;
+    public var regulation as Characteristic? = null;
+    public var goal as Characteristic? = null;
+    // Values waiting to be written; null when nothing is pending.
     public var pendingLevel as Number? = null;
+    public var pendingTarget as Number? = null;
+    public var pendingRegulation as Boolean? = null;
 
     public function initialize(newDevice as Device, newScan as ScanResult, newPack as Pack) {
         device = newDevice;
@@ -44,7 +51,8 @@ function makeTransport(model as Model) as Transport {
 //   - the watch scans passively and only reports advertisers that set the
 //     "discoverable" flag, so a pack is recognised by its service UUID alone;
 //   - Connect IQ takes one GATT request at a time, hence the queue;
-//   - nothing is written on connect - only setLevel() writes.
+//   - nothing is written on connect. Only setLevel(), setTarget() and setRegulation()
+//     write, and each is called for a press of a button.
 //
 // There is no timer in here, because a data field is not allowed one. The host calls
 // onTick() once a second instead.
@@ -59,18 +67,28 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
     // its link came up. Keep a wide margin.
     private const CONNECT_TIMEOUT_MS = 90000;
     private const OP_TIMEOUT_MS = 10000;
+    // The temperature inside a pack has no notifications. It is read again on every
+    // tenth round of housekeeping, which is every half a minute.
+    private const INSIDE_EVERY_CHECKS = 10;
 
     private var _model as Model;
     private var _serviceUuid as Uuid;
     private var _heatUuid as Uuid;
     private var _batteryUuid as Uuid;
     private var _temperatureUuid as Uuid;
+    private var _remainingUuid as Uuid;
+    private var _insideUuid as Uuid;
+    private var _regulationUuid as Uuid;
+    private var _goalUuid as Uuid;
 
     private var _links as Array<Link> = [] as Array<Link>;
     private var _ops as Array<Op> = [] as Array<Op>;
     private var _current as Op? = null;
     private var _currentSince as Number = 0;
     private var _sentLevel as Number = 0;
+    private var _sentTarget as Number = 0;
+    private var _sentRegulation as Boolean = false;
+    private var _checks as Number = 0;
 
     // The single connection attempt in progress.
     private var _pendingScan as ScanResult? = null;
@@ -94,19 +112,28 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
         _heatUuid = Protocol.uuid(Protocol.CODE_HEAT);
         _batteryUuid = Protocol.uuid(Protocol.CODE_BATTERY);
         _temperatureUuid = Protocol.uuid(Protocol.CODE_TEMPERATURE);
+        _remainingUuid = Protocol.uuid(Protocol.CODE_REMAINING);
+        _insideUuid = Protocol.uuid(Protocol.CODE_INSIDE);
+        _regulationUuid = Protocol.uuid(Protocol.CODE_REGULATION);
+        _goalUuid = Protocol.uuid(Protocol.CODE_TARGET);
     }
 
     public function start() as Void {
         BluetoothLowEnergy.setDelegate(self);
         try {
-            BluetoothLowEnergy.registerProfile({
-                :uuid => _serviceUuid,
-                :characteristics => [
-                    { :uuid => _heatUuid, :descriptors => [BluetoothLowEnergy.cccdUuid()] },
-                    { :uuid => _batteryUuid, :descriptors => [BluetoothLowEnergy.cccdUuid()] },
-                    { :uuid => _temperatureUuid, :descriptors => [BluetoothLowEnergy.cccdUuid()] }
-                ]
-            });
+            var cccd = BluetoothLowEnergy.cccdUuid();
+            var characteristics = [
+                { :uuid => _heatUuid, :descriptors => [cccd] },
+                { :uuid => _batteryUuid, :descriptors => [cccd] },
+                { :uuid => _temperatureUuid, :descriptors => [cccd] }
+            ];
+            if (_model.details) {
+                characteristics.add({ :uuid => _remainingUuid, :descriptors => [cccd] });
+                characteristics.add({ :uuid => _insideUuid });
+                characteristics.add({ :uuid => _regulationUuid });
+                characteristics.add({ :uuid => _goalUuid });
+            }
+            BluetoothLowEnergy.registerProfile({ :uuid => _serviceUuid, :characteristics => characteristics });
         } catch (e) {
             trace("profile error");
             _model.note = "profile error";
@@ -136,7 +163,52 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
         _pendingDevice = null;
     }
 
-    // The only place that writes to a pack.
+    // Stores the target temperature in every connected pack. With setLevel() and
+    // setRegulation() one of the three places that write to a pack.
+    public function setTarget(degrees as Number) as Void {
+        var sent = false;
+        for (var i = 0; i < _links.size(); i++) {
+            var link = _links[i];
+            if (link.goal == null) {
+                continue;
+            }
+            link.pendingTarget = degrees;
+            if (!queued(link, :writeTarget)) {
+                _ops.add(new Op(link, :writeTarget));
+            }
+            sent = true;
+        }
+        if (!sent) {
+            _model.note = "no pack takes it";
+        }
+        _model.changed();
+        run();
+    }
+
+    // Turns the regulation to the target temperature on or off in every connected
+    // pack. One of the three places that write to a pack.
+    public function setRegulation(on as Boolean) as Void {
+        var sent = false;
+        for (var i = 0; i < _links.size(); i++) {
+            var link = _links[i];
+            if (link.regulation == null) {
+                continue;
+            }
+            link.pendingRegulation = on;
+            if (!queued(link, :writeRegulation)) {
+                _ops.add(new Op(link, :writeRegulation));
+            }
+            sent = true;
+        }
+        if (!sent) {
+            _model.note = "no pack takes it";
+        }
+        _model.changed();
+        run();
+    }
+
+    // Sets the heat level of every connected pack. One of the three places that write
+    // to a pack.
     public function setLevel(level as Number) as Void {
         _model.target = level;
         var sent = false;
@@ -236,18 +308,28 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
         trace("read status " + status + ", value " + value);
         var op = _current;
         if (op != null) {
+            var pack = op.link.pack;
             if (status == BluetoothLowEnergy.STATUS_SUCCESS && value.size() > 0) {
                 if (op.kind == :readHeat) {
-                    op.link.pack.level = value[0];
+                    pack.level = value[0];
                     _model.packReported();
                 } else if (op.kind == :readBattery) {
-                    op.link.pack.battery = value[0];
+                    pack.battery = value[0];
                 } else if (op.kind == :readTemperature) {
-                    op.link.pack.temperature = Protocol.temperature(value[0]);
+                    pack.temperature = Protocol.temperature(value[0]);
+                } else if (op.kind == :readRemaining) {
+                    pack.remaining = Protocol.word(value);
+                } else if (op.kind == :readInside) {
+                    pack.inside = Protocol.degrees(value[0]);
+                } else if (op.kind == :readRegulation) {
+                    pack.regulating = (value[0] == 1);
+                } else if (op.kind == :readTarget) {
+                    pack.goal = Protocol.degrees(value[0]);
                 }
-            } else if (op.kind != :readTemperature) {
-                // The temperature is an extra: a pack that will not give it is still
-                // a pack, so that failure is not shown as an error.
+            } else if (op.kind == :readHeat || op.kind == :readBattery) {
+                // Level and battery are what a pack is used for. Everything else is an
+                // extra: a pack that will not give it is still a pack, so that failure
+                // is not shown as an error.
                 report(status);
             }
         }
@@ -266,6 +348,20 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
             }
             if (!writesPending()) {
                 _model.userDone();
+            }
+        } else if (op != null && op.kind == :writeTarget) {
+            if (status == BluetoothLowEnergy.STATUS_SUCCESS) {
+                op.link.pack.goal = _sentTarget;
+                _model.note = "";
+            } else {
+                report(status);
+            }
+        } else if (op != null && op.kind == :writeRegulation) {
+            if (status == BluetoothLowEnergy.STATUS_SUCCESS) {
+                op.link.pack.regulating = _sentRegulation;
+                _model.note = "";
+            } else {
+                report(status);
             }
         }
         finish();
@@ -309,6 +405,10 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
                     link.pack.temperature = degrees;
                     _model.changed();
                 }
+            } else if (characteristic.equals(link.remaining)) {
+                // Changes every minute while a pack heats, so it gets no line in the log.
+                link.pack.remaining = Protocol.word(value);
+                _model.changed();
             }
         }
     }
@@ -340,6 +440,17 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
             _model.userDone();
         }
         sweep();
+        if (_model.details) {
+            _checks++;
+            if (_checks >= INSIDE_EVERY_CHECKS) {
+                _checks = 0;
+                for (var i = 0; i < _links.size(); i++) {
+                    if (_links[i].inside != null && !queued(_links[i], :readInside)) {
+                        _ops.add(new Op(_links[i], :readInside));
+                    }
+                }
+            }
+        }
         updateScan();
         run();
     }
@@ -371,6 +482,18 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
         _ops.add(new Op(link, :subHeat));
         _ops.add(new Op(link, :subBattery));
         _ops.add(new Op(link, :subTemperature));
+        if (_model.details) {
+            // After the rest, so that level and battery are on the screen first.
+            link.remaining = service.getCharacteristic(_remainingUuid);
+            link.inside = service.getCharacteristic(_insideUuid);
+            link.regulation = service.getCharacteristic(_regulationUuid);
+            link.goal = service.getCharacteristic(_goalUuid);
+            _ops.add(new Op(link, :readRemaining));
+            _ops.add(new Op(link, :readInside));
+            _ops.add(new Op(link, :readRegulation));
+            _ops.add(new Op(link, :readTarget));
+            _ops.add(new Op(link, :subRemaining));
+        }
     }
 
     // Drops links whose device is gone. Returns true if any was removed.
@@ -435,17 +558,26 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
     private function issue(op as Op) as Boolean {
         var link = op.link;
         try {
-            if (op.kind == :readHeat && link.heat != null) {
-                (link.heat as Characteristic).requestRead();
-                return true;
+            if (op.kind == :readHeat) {
+                return read(link.heat);
             }
-            if (op.kind == :readBattery && link.battery != null) {
-                (link.battery as Characteristic).requestRead();
-                return true;
+            if (op.kind == :readBattery) {
+                return read(link.battery);
             }
-            if (op.kind == :readTemperature && link.temperature != null) {
-                (link.temperature as Characteristic).requestRead();
-                return true;
+            if (op.kind == :readTemperature) {
+                return read(link.temperature);
+            }
+            if (op.kind == :readRemaining) {
+                return read(link.remaining);
+            }
+            if (op.kind == :readInside) {
+                return read(link.inside);
+            }
+            if (op.kind == :readRegulation) {
+                return read(link.regulation);
+            }
+            if (op.kind == :readTarget) {
+                return read(link.goal);
             }
             if (op.kind == :subHeat) {
                 return subscribe(link.heat);
@@ -455,6 +587,23 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
             }
             if (op.kind == :subTemperature) {
                 return subscribe(link.temperature);
+            }
+            if (op.kind == :subRemaining) {
+                return subscribe(link.remaining);
+            }
+            if (op.kind == :writeTarget && link.goal != null && link.pendingTarget != null) {
+                _sentTarget = link.pendingTarget as Number;
+                link.pendingTarget = null;
+                (link.goal as Characteristic).requestWrite(
+                    [_sentTarget + Protocol.TEMPERATURE_OFFSET]b, {:writeType => BluetoothLowEnergy.WRITE_TYPE_WITH_RESPONSE});
+                return true;
+            }
+            if (op.kind == :writeRegulation && link.regulation != null && link.pendingRegulation != null) {
+                _sentRegulation = link.pendingRegulation as Boolean;
+                link.pendingRegulation = null;
+                (link.regulation as Characteristic).requestWrite(
+                    [_sentRegulation ? 1 : 0]b, {:writeType => BluetoothLowEnergy.WRITE_TYPE_WITH_RESPONSE});
+                return true;
             }
             if (op.kind == :write && link.heat != null && link.pendingLevel != null) {
                 _sentLevel = link.pendingLevel as Number;
@@ -467,6 +616,14 @@ class BleTransport extends BluetoothLowEnergy.BleDelegate {
             _model.note = "request error";
         }
         return false;
+    }
+
+    private function read(characteristic as Characteristic?) as Boolean {
+        if (characteristic == null) {
+            return false;
+        }
+        characteristic.requestRead();
+        return true;
     }
 
     private function subscribe(characteristic as Characteristic?) as Boolean {

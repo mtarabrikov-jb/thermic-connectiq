@@ -8,6 +8,16 @@ class Pack {
     public var battery as Number? = null;
     // Degrees Celsius at the heated gear; null when the pack reports no reading.
     public var temperature as Number? = null;
+
+    // The rest is read only when Model.details is set.
+    // Minutes of heating the pack expects to have left.
+    public var remaining as Number? = null;
+    // Degrees Celsius inside the pack.
+    public var inside as Number? = null;
+    // Whether the pack regulates to a target temperature, and that target in degrees
+    // Celsius. Both are settings kept in the pack.
+    public var regulating as Boolean? = null;
+    public var goal as Number? = null;
 }
 
 // Anything that can find packs and set their level. The views only use this
@@ -18,7 +28,12 @@ typedef Transport as interface {
     // Housekeeping. The host calls it once a second: a widget from a timer, a data
     // field from compute(), because a data field is not allowed a timer of its own.
     function onTick() as Void;
+    // The three writes. Each is called for one press of a button and stores one value
+    // in every connected pack: the heat level, the target temperature in degrees
+    // Celsius, and whether the pack regulates to that target.
     function setLevel(level as Number) as Void;
+    function setTarget(degrees as Number) as Void;
+    function setRegulation(on as Boolean) as Void;
 };
 
 // State shared by the transport and the views.
@@ -27,6 +42,10 @@ class Model {
     public const MAX_PACKS = 2;
 
     public var packs as Array<Pack> = [] as Array<Pack>;
+    // Set by an app before the transport starts when it also shows remaining heat time,
+    // the temperature inside the pack and the target temperature. Reading them makes
+    // connecting take longer, so an app that does not show them leaves this off.
+    public var details as Boolean = false;
     public var searching as Boolean = false;
     // A pack was found and the connection is being set up. This takes a while:
     // about 25 seconds were measured from link up to the first read.

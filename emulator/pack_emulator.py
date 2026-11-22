@@ -27,6 +27,7 @@ Console commands while running from a terminal:
   charge N     0 not charging, 1 pre-charge, 2 charging, 3 complete
   allowed 0|1  heating allowed flag
   ext T        external temperature, degrees Celsius
+  int T        temperature inside the pack, degrees Celsius
   show         print current state
   quit
 """
@@ -394,10 +395,12 @@ def console(pack, loop):
                 pack.set('HEATING_ALLOWED', int(arg))
             elif cmd == 'ext' and -40 <= int(arg) <= 215:
                 pack.set('EXTERNAL_TEMPERATURE', int(arg) + 40)
+            elif cmd == 'int' and -40 <= int(arg) <= 215:
+                pack.set('INTERNAL_TEMPERATURE', int(arg) + 40)
             else:
-                print('commands: heat N | battery N | charge N | allowed 0|1 | ext T | show | quit')
+                print('commands: heat N | battery N | charge N | allowed 0|1 | ext T | int T | show | quit')
         except (TypeError, ValueError):
-            print('commands: heat N | battery N | charge N | allowed 0|1 | ext T | show | quit')
+            print('commands: heat N | battery N | charge N | allowed 0|1 | ext T | int T | show | quit')
         return True
 
     GLib.io_add_watch(sys.stdin, GLib.IO_IN, on_line)

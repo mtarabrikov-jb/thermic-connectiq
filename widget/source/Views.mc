@@ -104,6 +104,16 @@ class ControlDelegate extends WatchUi.BehaviorDelegate {
         return false;
     }
 
+    // MENU, a long press of UP: the target temperature page.
+    public function onMenu() as Boolean {
+        flush();
+        System.println("control: menu, opening temperature page");
+        var state = new $.TargetState(_model);
+        WatchUi.pushView(new $.TemperatureView(_model, state),
+            new $.TemperatureDelegate(_transport, state), WatchUi.SLIDE_LEFT);
+        return true;
+    }
+
     public function onApply() as Void {
         flush();
     }

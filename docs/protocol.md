@@ -96,9 +96,29 @@ Observed with the emulator standing in for a pack.
 5. Changes the level with a single one-byte write to `0002`. No write precedes it.
 6. After a HEAT_LEVEL notification it writes the notified value back once.
 
-Modes: target temperature is done by the pack. The app writes `0015` = 1 and `0016` =
-target + 40. Boost, eco and motion appear to be timers inside the app that write plain
-heat levels; that is read from the app's code and data model, not observed.
+### Modes
+
+The app has five modes for a product. This is read from its code and its texts, not
+observed. No characteristic carries a mode. Apart from the target temperature a mode is
+something the phone does, and the pack only ever receives a heat level.
+
+- Manual: the level, 0 to 10.
+- Eco: heating and pauses in turn, to save the battery. The user sets the level, the
+  heating time and the break time in minutes. The app keeps the end of the current
+  stretch in its own database.
+- Motion: the level follows whether the user is moving. The user picks a kind of
+  activity and two levels, "static heating" and "heating in motion". Movement comes
+  from the phone: the app subscribes to Google's activity recognition and takes the
+  most confident result. Which results count as moving depends on the kind of activity
+  picked. Without the phone's permission to track physical activity the mode does not
+  start.
+- Boost: the highest level for 2, 5 or 10 minutes, then back.
+- Target temperature: the app writes `0015` = 1 and `0016` = target + 40. The pack has
+  those two characteristics for it, so the regulation is taken to run in the pack. The
+  target can be set from 15 to 35 degrees in steps of one, and a new product starts at
+  25. The app has a message for gear without a temperature sensor.
+
+While a mode other than manual runs, the app shows a notification that it is running.
 
 External temperature: the app takes a reading as present only from -20 to 214 degrees
 Celsius. Outside that range it acts as if the product had no sensor; a raw `FF` gives
@@ -133,6 +153,15 @@ Measured on a fenix 6S Pro, Connect IQ 3.4.5.
   temperature at the heated gear, within the range the phone app accepts. A pack that
   lacks the characteristic or refuses the read is used without it.
 
+The widget alone also uses these, and like the temperature each is optional:
+
+- `0010` REMAINING_HEAT_TIME: read and notifications, shown as it comes.
+- `0012` INTERNAL_TEMPERATURE: read when a pack connects and again every half a minute,
+  as it has no notifications. Shown as the temperature inside the pack.
+- `0015` and `0016`: read when a pack connects. The widget writes the target within the
+  phone app's 15 to 35 degrees, and writes the switch, each after a button press and
+  each on its own.
+
 ## Unknown
 
 - **Whether a real pack lets an unbonded central read and write.** The app insists on
@@ -141,6 +170,8 @@ Measured on a fenix 6S Pro, Connect IQ 3.4.5.
 - Whether a pack advertises as discoverable outside its pairing mode.
 - Whether a pack accepts more than one central at a time.
 - Units of the two-byte values.
+- Whether a pack keeps regulating to a target temperature on its own, with no phone or
+  watch connected.
 - What "external temperature" measures, and which products have a sensor for it. It is
   the value a pack regulates by in its target temperature mode, which is why the apps
   here take it for the temperature at the gear.

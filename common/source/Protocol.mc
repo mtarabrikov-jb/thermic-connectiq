@@ -9,7 +9,11 @@ import Toybox.Lang;
 //   0001  service
 //   0002  heat level, 1 byte, 0..10, read / write / notify
 //   0005  battery level, 1 byte, percent, read / notify
+//   0010  remaining heat time, 2 bytes, minutes, read / notify
+//   0012  internal temperature, 1 byte, value - 40 = degrees Celsius, read
 //   0013  external temperature, 1 byte, value - 40 = degrees Celsius, read / notify
+//   0015  target temperature regulation, 1 byte, 1 on / 0 off, read / write
+//   0016  target temperature, 1 byte, value - 40 = degrees Celsius, read / write
 //
 // Family templates:
 //   S-Pack    73cbXXXX-b806-43bd-9612-e3de0a18ccb6
@@ -36,6 +40,18 @@ module Protocol {
     const TEMPERATURE_MIN = -20;
     const TEMPERATURE_MAX = 214;
 
+    // What only the widget reads.
+    const CODE_REMAINING = 0x0010;
+    const CODE_INSIDE = 0x0012;
+    const CODE_REGULATION = 0x0015;
+    const CODE_TARGET = 0x0016;
+
+    // The phone app lets the target temperature be set from 15 to 35 degrees and starts
+    // a new product at 25.
+    const TARGET_MIN = 15;
+    const TARGET_MAX = 35;
+    const TARGET_DEFAULT = 25;
+
     // S-Pack template split into two 64-bit halves, code bits left as zero.
     const FAMILY_HIGH = 0x73CB0000B80643BDL;
     const FAMILY_LOW = 0x9612E3DE0A18CCB6L;
@@ -44,6 +60,28 @@ module Protocol {
     function temperature(raw as Number) as Number? {
         var degrees = raw - TEMPERATURE_OFFSET;
         return (degrees >= TEMPERATURE_MIN && degrees <= TEMPERATURE_MAX) ? degrees : null;
+    }
+
+    // Degrees Celsius for the raw byte of the other temperatures, which have no value
+    // that stands for "no reading".
+    function degrees(raw as Number) as Number {
+        return raw - TEMPERATURE_OFFSET;
+    }
+
+    // A two-byte value, low byte first, or null when the bytes are not all there.
+    function word(bytes as ByteArray) as Number? {
+        if (bytes.size() < 2) {
+            return null;
+        }
+        return bytes[0] | (bytes[1] << 8);
+    }
+
+    // A target temperature brought into the range a pack is given.
+    function clampTarget(degrees as Number) as Number {
+        if (degrees < TARGET_MIN) {
+            return TARGET_MIN;
+        }
+        return (degrees > TARGET_MAX) ? TARGET_MAX : degrees;
     }
 
     function uuid(code as Number) as Uuid {

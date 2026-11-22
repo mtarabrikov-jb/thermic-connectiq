@@ -36,6 +36,23 @@ module Icons {
         dc.drawLine(x + 4, y + 10, x + 8, y + 10);
     }
 
+    const CLOCK_SIZE = 11;
+
+    // A clock face showing a little past twelve; x is its left edge and y its top.
+    function clock(dc as Dc, x as Number, y as Number) as Void {
+        var cx = x + 5;
+        var cy = y + 5;
+        dc.drawCircle(cx, cy, 5);
+        dc.drawLine(cx, cy, cx, cy - 4);
+        dc.drawLine(cx, cy, cx + 3, cy);
+    }
+
+    // A small arrowhead pointing right, from a reading to its target; x is its left
+    // edge and y its middle.
+    function pointer(dc as Dc, x as Number, y as Number) as Void {
+        dc.fillPolygon([[x, y - 4], [x, y + 4], [x + 5, y]]);
+    }
+
     // A battery filled as far as it is charged; x is its left edge and y its top.
     // Sets its own colours: grey outline, white charge, red charge when nearly empty.
     function battery(dc as Dc, x as Number, y as Number, percent as Number?) as Void {

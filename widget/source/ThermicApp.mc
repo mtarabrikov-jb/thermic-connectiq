@@ -19,6 +19,9 @@ class ThermicApp extends Application.AppBase {
     public function onStart(state as Dictionary?) as Void {
         System.println("app: start");
         var model = new $.Model();
+        // The widget also shows remaining heat time, the temperature inside the pack
+        // and the target temperature.
+        model.details = true;
         var transport = $.makeTransport(model);
         _model = model;
         _transport = transport;

@@ -52,29 +52,41 @@ in each of the watch's ten layouts.
 
 ## Using the widget
 
-Main page with one pack: the level as a number and a ring, and under it the temperature
-at the gear and the battery.
+Main page with one pack: the level as a number and a ring. Under it, line by line: the
+temperature at the gear, the battery with the temperature inside the pack next to it,
+and how long the pack expects its heat to last.
 
 Main page with two packs: a column for each under a left and a right foot. Each has its
-own half of the ring, its level, its temperature and its battery.
+own half of the ring, its level and the same lines.
 
-The temperature is left out when the gear reports none.
+The temperature at the gear is left out when the gear reports none. While a pack
+regulates to a target temperature, the target follows the reading: `24° ▸ 27°`.
 
 The watch cannot tell which pack is on which foot: the first one to connect is shown on
 the left, and that can differ from one time to the next. Press the button on a pack to
 see which column changes.
 
-- START opens the control page.
+- START opens the level page.
 - UP and DOWN are left to the watch, so the widget loop keeps scrolling.
 
-Control page:
+Level page:
 
 - UP and DOWN change the level, 0 to 10. Several quick presses become one write.
 - START switches the heat off, or back to the last level that was on.
+- MENU, a long press of UP, opens the temperature page.
 - BACK returns to the main page.
 
+Temperature page, for gear that reports a temperature:
+
+- UP and DOWN change the target, 15 to 35 degrees Celsius. The packs keep it.
+- START turns the regulation to that target on or off.
+- BACK returns to the level page.
+
+What a pack does with its level while it regulates, and whether it goes on regulating
+with nothing connected, is not known yet.
+
 The widget never writes to a pack on its own. A level changed with the button on the
-pack shows up on the watch, and the control page continues from that value.
+pack shows up on the watch, and the level page continues from that value.
 
 ## Using the data field
 
@@ -165,6 +177,8 @@ python3 emulator/pack_emulator.py --log session.log
 # then, in its console:
 #   heat 7        the pack changes level by itself
 #   battery 50
+#   ext 31        temperature at the gear
+#   int 12        temperature inside the pack
 #   show
 ```
 

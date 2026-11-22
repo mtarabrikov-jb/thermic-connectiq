@@ -42,20 +42,35 @@ class DemoTransport {
         _apply = true;
     }
 
+    public function setTarget(degrees as Number) as Void {
+        for (var i = 0; i < _model.packs.size(); i++) {
+            _model.packs[i].goal = degrees;
+        }
+        _model.changed();
+    }
+
+    public function setRegulation(on as Boolean) as Void {
+        for (var i = 0; i < _model.packs.size(); i++) {
+            _model.packs[i].regulating = on;
+        }
+        _model.changed();
+    }
+
     public function onTick() as Void {
         if (!_running) {
             return;
         }
         _ticks++;
         if (_ticks == FIRST_PACK_TICK) {
-            add(3, 87, 24);
+            add(3, 87, 24, 95, 22);
         } else if (_ticks == SECOND_PACK_TICK) {
-            add(3, 64, 26);
+            add(3, 64, 26, 140, 21);
             _model.searching = false;
         } else if (_ticks == BUTTON_TICK && _model.packs.size() > 0) {
             // Somebody pressed the button on the first pack: it changes level on its
-            // own, and its gear gets warmer than the other.
+            // own, its gear gets warmer than the other and its heat will not last as long.
             _model.packs[0].level = 7;
+            _model.packs[0].remaining = 48;
             for (var i = 0; i < _model.packs.size(); i++) {
                 _model.packs[i].temperature = 31 - 4 * i;
             }
@@ -75,11 +90,18 @@ class DemoTransport {
         }
     }
 
-    private function add(level as Number, battery as Number, temperature as Number) as Void {
+    private function add(level as Number, battery as Number, temperature as Number,
+            remaining as Number, inside as Number) as Void {
         var pack = new Pack();
         pack.level = level;
         pack.battery = battery;
         pack.temperature = temperature;
+        if (_model.details) {
+            pack.remaining = remaining;
+            pack.inside = inside;
+            pack.regulating = false;
+            pack.goal = Protocol.TARGET_DEFAULT;
+        }
         _model.packs.add(pack);
     }
 }

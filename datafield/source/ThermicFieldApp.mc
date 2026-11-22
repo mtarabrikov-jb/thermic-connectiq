@@ -6,7 +6,7 @@ import Toybox.WatchUi;
 // Data field that shows the heat level during an activity and records it.
 //
 // It only listens. A data field gets no button input on this watch, so nothing here
-// calls Transport.setLevel().
+// calls any of the three writes of Transport.
 class ThermicFieldApp extends Application.AppBase {
 
     private var _model as Model? = null;
