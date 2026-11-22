@@ -256,6 +256,10 @@ Connect IQ:
   emulator learned to disconnect, stopping it left the watch connected to nothing, with
   no "disconnected" in its log, and a test of "the pack is gone" tested nothing. `quit`
   and the `drop` command cut the link now, and the emulator's log says `LINK dropped`.
+- The widget's demo build takes its icon from `private/` like the real one, and the
+  glance shows that icon. For a picture that gets published, build from a copy of
+  `widget/` and `common/` with no `private/` beside it. `docs/screens.png` is made that
+  way, and in metric units: the simulator starts in statute ones.
 - The simulator stops the app while one of its menus is open. Count a `wait:` from the
   moment the menu closes, or the shot shows an earlier state than its name says.
 - The simulator starts with statute units, so temperatures come out in Fahrenheit.

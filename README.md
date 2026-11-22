@@ -34,9 +34,11 @@ Experimental, and **not yet tried on real hardware**.
 
 ![The widget and the data field in the simulator](docs/screens.png)
 
-Taken in the simulator with made-up packs. Top row: the widget with two packs. Second
-row: the widget and the data field with one pack. Below: the data field with two packs
-in each of the watch's ten layouts.
+Taken in the simulator with made-up packs. The first two rows are the widget. The next
+two are the data field with two packs in each of the watch's ten layouts. The last row
+is the data field with one pack and with none, and its alert: in the field's own cells,
+and as the pop-up draws it. The simulator does not show that pop-up for this watch, so
+the last picture is its drawing run in a cell of the field.
 
 ## What is here
 
